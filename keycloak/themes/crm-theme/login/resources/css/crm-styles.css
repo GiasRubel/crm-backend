@@ -1,0 +1,270 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap');
+
+/* Main Body & Background */
+body {
+  font-family: 'Outfit', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background-color: #030712 !important; /* Tailwind slate-950 */
+  background-image: 
+    radial-gradient(circle at 10% 20%, rgba(99, 102, 241, 0.15) 0%, transparent 40%),
+    radial-gradient(circle at 90% 80%, rgba(16, 185, 129, 0.08) 0%, transparent 45%),
+    radial-gradient(circle at 50% 50%, rgba(99, 102, 241, 0.04) 0%, transparent 50%) !important;
+  background-attachment: fixed !important;
+  color: #f1f5f9 !important; /* Tailwind slate-100 */
+  min-height: 100vh;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Hide default Keycloak background properties if any */
+.login-pf-page {
+  background: transparent !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+/* Card Container */
+#kc-card-wrapper, .card-pf {
+  background: rgba(15, 23, 42, 0.65) !important; /* Dark Slate transparent */
+  backdrop-filter: blur(24px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 28px !important;
+  box-shadow: 
+    0 4px 6px -1px rgba(0, 0, 0, 0.1),
+    0 20px 40px -10px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0px 0px rgba(255, 255, 255, 0.1) !important;
+  padding: 40px !important;
+  max-width: 440px !important;
+  width: 100% !important;
+  margin: 20px auto !important;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+/* Card Hover effect */
+.card-pf:hover {
+  border-color: rgba(99, 102, 241, 0.25) !important;
+  box-shadow: 
+    0 0 50px -10px rgba(99, 102, 241, 0.15),
+    0 25px 50px -12px rgba(0, 0, 0, 0.6),
+    inset 0 1px 0px 0px rgba(255, 255, 255, 0.15) !important;
+}
+
+/* Logo & Header */
+#kc-header, #kc-header-wrapper {
+  display: none !important; /* Hide keycloak header as we build custom logo on card */
+}
+
+/* Title on the form card */
+#kc-page-title {
+  font-family: 'Outfit', sans-serif !important;
+  font-size: 28px !important;
+  font-weight: 800 !important;
+  text-align: center !important;
+  letter-spacing: -0.03em !important;
+  margin-top: 15px !important;
+  margin-bottom: 25px !important;
+  color: #ffffff !important;
+  background: linear-gradient(to right, #ffffff, #c7d2fe, #e2e8f0);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* Custom logo branding before the title */
+.card-pf::before {
+  content: "C" !important;
+  display: flex !important;
+  width: 52px !important;
+  height: 52px !important;
+  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%) !important;
+  color: #ffffff !important;
+  font-size: 26px !important;
+  font-weight: 900 !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border-radius: 16px !important;
+  margin: 0 auto 20px auto !important;
+  box-shadow: 
+    0 10px 20px -5px rgba(99, 102, 241, 0.5),
+    inset 0 1px 0px 0px rgba(255, 255, 255, 0.3) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+}
+
+/* Form inputs & Labels */
+.form-group {
+  margin-bottom: 20px !important;
+}
+
+label.control-label {
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.05em !important;
+  color: #94a3b8 !important; /* slate-400 */
+  margin-bottom: 8px !important;
+  display: block !important;
+}
+
+input.form-control {
+  background-color: rgba(15, 23, 42, 0.6) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border-radius: 14px !important;
+  color: #ffffff !important;
+  padding: 14px 16px !important;
+  font-size: 15px !important;
+  font-weight: 500 !important;
+  height: auto !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+  transition: all 0.2s ease !important;
+  box-shadow: inset 0 2px 4px 0 rgba(0, 0, 0, 0.06) !important;
+}
+
+input.form-control:focus {
+  border-color: #6366f1 !important;
+  background-color: rgba(15, 23, 42, 0.8) !important;
+  box-shadow: 
+    0 0 0 4px rgba(99, 102, 241, 0.15),
+    inset 0 2px 4px 0 rgba(0, 0, 0, 0.06) !important;
+  outline: none !important;
+}
+
+/* Primary Button styling */
+.btn-primary {
+  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border-radius: 14px !important;
+  color: #ffffff !important;
+  font-size: 15px !important;
+  font-weight: 600 !important;
+  padding: 14px 20px !important;
+  width: 100% !important;
+  cursor: pointer !important;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  box-shadow: 
+    0 4px 12px rgba(99, 102, 241, 0.25),
+    inset 0 1px 0px 0px rgba(255, 255, 255, 0.2) !important;
+  margin-top: 10px !important;
+}
+
+.btn-primary:hover {
+  background: linear-gradient(135deg, #4f46e5 0%, #4338ca 100%) !important;
+  box-shadow: 
+    0 6px 20px rgba(99, 102, 241, 0.35),
+    inset 0 1px 0px 0px rgba(255, 255, 255, 0.2) !important;
+  transform: translateY(-1px) !important;
+}
+
+.btn-primary:active {
+  transform: translateY(1px) !important;
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.2) !important;
+}
+
+/* Checkbox & Forgot Password row */
+.login-pf-settings {
+  display: flex !important;
+  justify-content: space-between !important;
+  align-items: center !important;
+  font-size: 14px !important;
+  margin-bottom: 20px !important;
+  color: #94a3b8 !important;
+}
+
+.login-pf-settings a {
+  color: #818cf8 !important; /* violet-400 */
+  text-decoration: none !important;
+  font-weight: 500 !important;
+  transition: color 0.15s ease !important;
+}
+
+.login-pf-settings a:hover {
+  color: #a5b4fc !important;
+  text-decoration: underline !important;
+}
+
+/* Checkbox alignment */
+.checkbox label {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  cursor: pointer !important;
+  color: #94a3b8 !important;
+  font-weight: 500 !important;
+}
+
+.checkbox input[type="checkbox"] {
+  accent-color: #6366f1 !important;
+  width: 16px !important;
+  height: 16px !important;
+  cursor: pointer !important;
+}
+
+/* Info Section (Registration & Sign up links) */
+#kc-info, #kc-info-wrapper {
+  margin-top: 25px !important;
+  padding-top: 20px !important;
+  border-top: 1px solid rgba(255, 255, 255, 0.06) !important;
+  text-align: center !important;
+  font-size: 14px !important;
+  color: #94a3b8 !important;
+}
+
+#kc-info-wrapper a, #kc-registration a {
+  color: #10b981 !important; /* Emerald-500 */
+  text-decoration: none !important;
+  font-weight: 600 !important;
+  margin-left: 5px !important;
+  transition: all 0.15s ease !important;
+}
+
+#kc-info-wrapper a:hover, #kc-registration a:hover {
+  color: #34d399 !important;
+  text-decoration: underline !important;
+}
+
+/* Alerts and Messages (Errors / Success messages) */
+.alert {
+  border-radius: 12px !important;
+  padding: 12px 16px !important;
+  font-size: 14px !important;
+  font-weight: 500 !important;
+  margin-bottom: 20px !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  border: 1px solid transparent !important;
+}
+
+.alert-error {
+  background-color: rgba(239, 68, 68, 0.15) !important;
+  border-color: rgba(239, 68, 68, 0.3) !important;
+  color: #fca5a5 !important;
+}
+
+.alert-success {
+  background-color: rgba(16, 185, 129, 0.15) !important;
+  border-color: rgba(16, 185, 129, 0.3) !important;
+  color: #a7f3d0 !important;
+}
+
+.alert-warning {
+  background-color: rgba(245, 158, 11, 0.15) !important;
+  border-color: rgba(245, 158, 11, 0.3) !important;
+  color: #fde047 !important;
+}
+
+.alert-info {
+  background-color: rgba(59, 130, 246, 0.15) !important;
+  border-color: rgba(59, 130, 246, 0.3) !important;
+  color: #bfdbfe !important;
+}
+
+/* Hide Default Keycloak footer info if exists */
+#kc-feedback {
+  margin-bottom: 15px !important;
+}
+
+.kc-feedback-text {
+  display: inline-block !important;
+}
