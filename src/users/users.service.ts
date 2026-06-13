@@ -19,6 +19,26 @@ export class UsersService {
     return this.userModel.findOne({ email: email.trim().toLowerCase() }).exec();
   }
 
+  async createCustomerUser(
+    keycloakId: string,
+    email: string,
+    firstName: string,
+    lastName: string,
+  ): Promise<UserDocument> {
+    return this.userModel.create({
+      keycloakId,
+      email: email.trim().toLowerCase(),
+      username: email.trim().toLowerCase(),
+      firstName: firstName.trim(),
+      lastName: lastName.trim(),
+      role: AppRole.Customer,
+    });
+  }
+
+  async deleteByKeycloakId(keycloakId: string): Promise<void> {
+    await this.userModel.deleteOne({ keycloakId }).exec();
+  }
+
   async getOrProvisionMe(payload: KeycloakJwtPayload): Promise<UserResponseDto> {
     const existing = await this.findByKeycloakId(payload.sub);
 
