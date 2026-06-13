@@ -1,10 +1,7 @@
-import {
-  BadRequestException,
-  Injectable,
-} from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { KeycloakJwtPayload } from '../auth/interfaces/keycloak-jwt-payload.interface';
+import type { KeycloakJwtPayload } from '../auth/interfaces/keycloak-jwt-payload.interface';
 import { AppRole } from './app-role.enum';
 import { UserResponseDto } from './dto/user-response.dto';
 import { toUserResponseDto } from './mappers/user.mapper';
@@ -16,6 +13,10 @@ export class UsersService {
 
   async findByKeycloakId(keycloakId: string): Promise<UserDocument | null> {
     return this.userModel.findOne({ keycloakId }).exec();
+  }
+
+  async findByEmail(email: string): Promise<UserDocument | null> {
+    return this.userModel.findOne({ email: email.trim().toLowerCase() }).exec();
   }
 
   async getOrProvisionMe(payload: KeycloakJwtPayload): Promise<UserResponseDto> {
@@ -48,11 +49,7 @@ export class UsersService {
 
   private async provisionFromJwt(payload: KeycloakJwtPayload): Promise<UserDocument> {
     const identity = this.extractIdentity(payload);
-
-    return this.userModel.create({
-      ...identity,
-      role: AppRole.User,
-    });
+    return this.userModel.create({ ...identity, role: AppRole.User });
   }
 
   private async syncIdentityFields(
@@ -67,9 +64,8 @@ export class UsersService {
     if (user.firstName !== identity.firstName) updates.firstName = identity.firstName;
     if (user.lastName !== identity.lastName) updates.lastName = identity.lastName;
 
-    if (Object.keys(updates).length === 0) {
-      return user;
-    }
+    // Nothing changed — return as-is without a DB write
+    if (Object.keys(updates).length === 0) return user;
 
     return this.userModel
       .findByIdAndUpdate(user._id, { $set: updates }, { new: true })

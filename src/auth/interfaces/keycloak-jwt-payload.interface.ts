@@ -8,4 +8,6 @@ export interface KeycloakJwtPayload {
   iss?: string;
   exp?: number;
   iat?: number;
+  /** Present when the user authenticated via a Keycloak Identity Provider (e.g. google, facebook) */
+  identity_provider?: string;
 }
