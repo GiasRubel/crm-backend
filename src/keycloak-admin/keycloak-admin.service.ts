@@ -1,4 +1,9 @@
-import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  InternalServerErrorException,
+  Logger,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 @Injectable()
@@ -14,10 +19,14 @@ export class KeycloakAdminService {
   private tokenExpiresAt = 0;
 
   constructor(private readonly config: ConfigService) {
-    this.authServerUrl = this.config.getOrThrow<string>('KEYCLOAK_AUTH_SERVER_URL');
+    this.authServerUrl = this.config.getOrThrow<string>(
+      'KEYCLOAK_AUTH_SERVER_URL',
+    );
     this.realm = this.config.getOrThrow<string>('KEYCLOAK_REALM');
     this.clientId = this.config.getOrThrow<string>('KEYCLOAK_ADMIN_CLIENT_ID');
-    this.clientSecret = this.config.getOrThrow<string>('KEYCLOAK_ADMIN_CLIENT_SECRET');
+    this.clientSecret = this.config.getOrThrow<string>(
+      'KEYCLOAK_ADMIN_CLIENT_SECRET',
+    );
   }
 
   /**
@@ -43,8 +52,12 @@ export class KeycloakAdminService {
 
     if (!res.ok) {
       const body = await res.text();
-      this.logger.error(`Keycloak reset-password failed: ${res.status} ${body}`);
-      throw new InternalServerErrorException('Failed to update password. Please try again.');
+      this.logger.error(
+        `Keycloak reset-password failed: ${res.status} ${body}`,
+      );
+      throw new InternalServerErrorException(
+        'Failed to update password. Please try again.',
+      );
     }
 
     this.logger.log(`Password reset for Keycloak user ${keycloakId}`);
@@ -54,7 +67,11 @@ export class KeycloakAdminService {
    * Create a Keycloak user and return their Keycloak user ID.
    * Used by the Customer module.
    */
-  async createUser(email: string, firstName: string, lastName: string): Promise<string> {
+  async createUser(
+    email: string,
+    firstName: string,
+    lastName: string,
+  ): Promise<string> {
     const token = await this.getAdminToken();
     const url = `${this.authServerUrl}/admin/realms/${this.realm}/users`;
 
@@ -77,14 +94,28 @@ export class KeycloakAdminService {
     if (!res.ok) {
       const body = await res.text();
       this.logger.error(`Keycloak createUser failed: ${res.status} ${body}`);
-      throw new InternalServerErrorException('Failed to create user in Keycloak.');
+      if (res.status === 409) {
+        throw new ConflictException(
+          'A user with this email already exists in Keycloak',
+        );
+      }
+      if (res.status === 403) {
+        throw new InternalServerErrorException(
+          'The Keycloak admin service account is not allowed to manage users. Grant it the realm-management "manage-users" role.',
+        );
+      }
+      throw new InternalServerErrorException(
+        'Failed to create user in Keycloak.',
+      );
     }
 
     // Keycloak returns the new user ID in the Location header
     const location = res.headers.get('Location') ?? '';
     const keycloakId = location.split('/').pop();
     if (!keycloakId) {
-      throw new InternalServerErrorException('Keycloak did not return a user ID.');
+      throw new InternalServerErrorException(
+        'Keycloak did not return a user ID.',
+      );
     }
 
     this.logger.log(`Keycloak user created: ${keycloakId} (${email})`);
@@ -109,8 +140,12 @@ export class KeycloakAdminService {
 
     if (!res.ok) {
       const body = await res.text();
-      this.logger.error(`Keycloak execute-actions-email failed: ${res.status} ${body}`);
-      throw new InternalServerErrorException('Failed to send invitation email.');
+      this.logger.error(
+        `Keycloak execute-actions-email failed: ${res.status} ${body}`,
+      );
+      throw new InternalServerErrorException(
+        'Failed to send invitation email.',
+      );
     }
   }
 
@@ -128,7 +163,9 @@ export class KeycloakAdminService {
 
     if (!res.ok && res.status !== 404) {
       this.logger.error(`Keycloak deleteUser failed: ${res.status}`);
-      throw new InternalServerErrorException('Failed to delete user from Keycloak.');
+      throw new InternalServerErrorException(
+        'Failed to delete user from Keycloak.',
+      );
     }
   }
 
@@ -137,7 +174,12 @@ export class KeycloakAdminService {
    */
   async updateUser(
     keycloakId: string,
-    patch: { firstName?: string; lastName?: string; email?: string },
+    patch: {
+      firstName?: string;
+      lastName?: string;
+      email?: string;
+      enabled?: boolean;
+    },
   ): Promise<void> {
     const token = await this.getAdminToken();
     const url = `${this.authServerUrl}/admin/realms/${this.realm}/users/${keycloakId}`;
@@ -153,7 +195,9 @@ export class KeycloakAdminService {
 
     if (!res.ok) {
       this.logger.error(`Keycloak updateUser failed: ${res.status}`);
-      throw new InternalServerErrorException('Failed to update user in Keycloak.');
+      throw new InternalServerErrorException(
+        'Failed to update user in Keycloak.',
+      );
     }
   }
 
@@ -183,11 +227,18 @@ export class KeycloakAdminService {
 
     if (!res.ok) {
       const text = await res.text();
-      this.logger.error(`Failed to get Keycloak admin token: ${res.status} ${text}`);
-      throw new InternalServerErrorException('Keycloak admin authentication failed.');
+      this.logger.error(
+        `Failed to get Keycloak admin token: ${res.status} ${text}`,
+      );
+      throw new InternalServerErrorException(
+        'Keycloak admin authentication failed.',
+      );
     }
 
-    const data = (await res.json()) as { access_token: string; expires_in: number };
+    const data = (await res.json()) as {
+      access_token: string;
+      expires_in: number;
+    };
     this.cachedToken = data.access_token;
     this.tokenExpiresAt = Date.now() + data.expires_in * 1000;
 

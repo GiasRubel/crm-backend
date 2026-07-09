@@ -1,5 +1,6 @@
+import { Transform, Type } from 'class-transformer';
 import {
-  IsEnum,
+  IsBoolean,
   IsIn,
   IsInt,
   IsOptional,
@@ -8,20 +9,11 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
-import { Type } from 'class-transformer';
 
-export const CUSTOMER_SORT_FIELDS = [
-  'createdAt',
-  'updatedAt',
-  'firstName',
-  'lastName',
-  'email',
-  'company',
-  'status',
-] as const;
-export type CustomerSortField = (typeof CUSTOMER_SORT_FIELDS)[number];
+export const TEAM_SORT_FIELDS = ['name', 'createdAt', 'updatedAt'] as const;
+export type TeamSortField = (typeof TEAM_SORT_FIELDS)[number];
 
-export class CustomerQueryDto {
+export class TeamQueryDto {
   @IsInt()
   @Min(1)
   @IsOptional()
@@ -40,13 +32,16 @@ export class CustomerQueryDto {
   @IsOptional()
   search?: string;
 
-  @IsEnum(['active', 'inactive', 'prospect'])
+  @IsBoolean()
   @IsOptional()
-  status?: 'active' | 'inactive' | 'prospect';
+  @Transform(({ value }: { value: unknown }) =>
+    value === 'true' ? true : value === 'false' ? false : value,
+  )
+  isActive?: boolean;
 
-  @IsIn(CUSTOMER_SORT_FIELDS)
+  @IsIn(TEAM_SORT_FIELDS)
   @IsOptional()
-  sortBy?: CustomerSortField = 'createdAt';
+  sortBy?: TeamSortField = 'createdAt';
 
   @IsIn(['asc', 'desc'])
   @IsOptional()

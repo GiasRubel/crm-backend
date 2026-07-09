@@ -19,6 +19,25 @@ export class UsersService {
     return this.userModel.findOne({ email: email.trim().toLowerCase() }).exec();
   }
 
+  /** Staff users (any role except Customer) matching the given keycloakIds. */
+  async findStaffByKeycloakIds(keycloakIds: string[]): Promise<UserDocument[]> {
+    if (keycloakIds.length === 0) return [];
+    return this.userModel
+      .find({
+        keycloakId: { $in: keycloakIds },
+        role: { $ne: AppRole.Customer },
+      })
+      .exec();
+  }
+
+  /** All staff users (any role except Customer), for team member pickers. */
+  async findAllStaff(): Promise<UserDocument[]> {
+    return this.userModel
+      .find({ role: { $ne: AppRole.Customer } })
+      .sort({ firstName: 1, lastName: 1 })
+      .exec();
+  }
+
   async createCustomerUser(
     keycloakId: string,
     email: string,
@@ -39,7 +58,9 @@ export class UsersService {
     await this.userModel.deleteOne({ keycloakId }).exec();
   }
 
-  async getOrProvisionMe(payload: KeycloakJwtPayload): Promise<UserResponseDto> {
+  async getOrProvisionMe(
+    payload: KeycloakJwtPayload,
+  ): Promise<UserResponseDto> {
     const existing = await this.findByKeycloakId(payload.sub);
 
     if (existing) {
@@ -55,7 +76,9 @@ export class UsersService {
     const email = payload.email?.trim().toLowerCase();
 
     if (!email) {
-      throw new BadRequestException('Email claim is required to provision user');
+      throw new BadRequestException(
+        'Email claim is required to provision user',
+      );
     }
 
     return {
@@ -67,7 +90,9 @@ export class UsersService {
     };
   }
 
-  private async provisionFromJwt(payload: KeycloakJwtPayload): Promise<UserDocument> {
+  private async provisionFromJwt(
+    payload: KeycloakJwtPayload,
+  ): Promise<UserDocument> {
     const identity = this.extractIdentity(payload);
     return this.userModel.create({ ...identity, role: AppRole.User });
   }
@@ -80,9 +105,12 @@ export class UsersService {
     const updates: Partial<User> = {};
 
     if (user.email !== identity.email) updates.email = identity.email;
-    if (user.username !== identity.username) updates.username = identity.username;
-    if (user.firstName !== identity.firstName) updates.firstName = identity.firstName;
-    if (user.lastName !== identity.lastName) updates.lastName = identity.lastName;
+    if (user.username !== identity.username)
+      updates.username = identity.username;
+    if (user.firstName !== identity.firstName)
+      updates.firstName = identity.firstName;
+    if (user.lastName !== identity.lastName)
+      updates.lastName = identity.lastName;
 
     // Nothing changed — return as-is without a DB write
     if (Object.keys(updates).length === 0) return user;

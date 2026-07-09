@@ -10,7 +10,10 @@ export class MailService {
   private readonly fromName: string;
 
   constructor(private readonly configService: ConfigService) {
-    this.fromAddress = configService.get<string>('MAIL_FROM_ADDRESS', 'noreply@crmpro.com');
+    this.fromAddress = configService.get<string>(
+      'MAIL_FROM_ADDRESS',
+      'noreply@crmpro.com',
+    );
     this.fromName = configService.get<string>('MAIL_FROM_NAME', 'CRM Pro');
 
     this.transporter = nodemailer.createTransport({

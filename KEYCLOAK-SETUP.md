@@ -42,6 +42,11 @@ Open your browser and navigate to the Keycloak Admin Console at `http://localhos
 5. Check the **Service accounts roles** checkbox. Click **Save**.
 6. Navigate to the newly visible **Credentials** tab at the top.
 7. Copy the **Client Secret** value. This will be used as `KEYCLOAK_ADMIN_CLIENT_SECRET` in the backend configuration.
+8. **Grant the service account user-management roles** (without this, every admin API
+   call returns 403 and customer creation fails with "Failed to create user in Keycloak."):
+   1. Open the **Service accounts roles** tab of the `crm-backend-service` client.
+   2. Click **Assign role**, then switch the filter to **Filter by clients**.
+   3. Assign the `realm-management` roles: **manage-users**, **view-users**, and **query-users**.
 
 ### 1C — Add Protocol Mapper for Identity Provider Claim
 1. Click on **Clients** from the left-hand navigation menu.

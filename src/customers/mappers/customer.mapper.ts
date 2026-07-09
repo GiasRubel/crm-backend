@@ -1,7 +1,20 @@
 import { CustomerDocument } from '../customer.schema';
 import { CustomerResponseDto } from '../dto/customer-response.dto';
 
-export function toCustomerResponseDto(customer: CustomerDocument): CustomerResponseDto {
+export interface CustomerAssignmentNames {
+  /** keycloakId → staff display name */
+  ownerNames?: Map<string, string>;
+  /** teamId → team name */
+  teamNames?: Map<string, string>;
+}
+
+export function toCustomerResponseDto(
+  customer: CustomerDocument,
+  names: CustomerAssignmentNames = {},
+): CustomerResponseDto {
+  const assignedToId = customer.assignedToId ?? null;
+  const assignedTeamId = customer.assignedTeamId?.toString() ?? null;
+
   return {
     id: customer._id.toString(),
     keycloakId: customer.keycloakId,
@@ -14,7 +27,13 @@ export function toCustomerResponseDto(customer: CustomerDocument): CustomerRespo
     notes: customer.notes,
     status: customer.status,
     createdBy: customer.createdBy,
-    createdAt: (customer as any).createdAt?.toISOString() ?? '',
-    updatedAt: (customer as any).updatedAt?.toISOString() ?? '',
+    assignedToId,
+    assignedToName:
+      (assignedToId && names.ownerNames?.get(assignedToId)) || null,
+    assignedTeamId,
+    assignedTeamName:
+      (assignedTeamId && names.teamNames?.get(assignedTeamId)) || null,
+    createdAt: customer.createdAt?.toISOString() ?? '',
+    updatedAt: customer.updatedAt?.toISOString() ?? '',
   };
 }

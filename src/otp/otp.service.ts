@@ -32,7 +32,12 @@ export class OtpService {
     const code = this.generateCode();
     const expiresAt = new Date(Date.now() + OTP_TTL_MINUTES * 60 * 1000);
 
-    await this.otpModel.create({ keycloakId: key, code, attempts: 0, expiresAt });
+    await this.otpModel.create({
+      keycloakId: key,
+      code,
+      attempts: 0,
+      expiresAt,
+    });
     this.logger.log(`OTP generated for ${email}`);
     await this.mailService.sendOtp(email, code);
   }
@@ -51,12 +56,16 @@ export class OtpService {
 
     if (record.expiresAt < new Date()) {
       await record.deleteOne();
-      throw new BadRequestException('OTP has expired. Please request a new one.');
+      throw new BadRequestException(
+        'OTP has expired. Please request a new one.',
+      );
     }
 
     if (record.attempts >= MAX_ATTEMPTS) {
       await record.deleteOne();
-      throw new ForbiddenException('Too many failed attempts. Please request a new OTP.');
+      throw new ForbiddenException(
+        'Too many failed attempts. Please request a new OTP.',
+      );
     }
 
     if (record.code !== submittedCode) {

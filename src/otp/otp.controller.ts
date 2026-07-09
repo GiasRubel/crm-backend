@@ -4,8 +4,6 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { KeycloakJwtPayload } from '../auth/interfaces/keycloak-jwt-payload.interface';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 
-
-
 @Controller('auth/otp')
 export class OtpController {
   constructor(private readonly otpService: OtpService) {}
@@ -17,7 +15,9 @@ export class OtpController {
    */
   @Post('send')
   @HttpCode(HttpStatus.OK)
-  async send(@CurrentUser() user: KeycloakJwtPayload): Promise<{ message: string }> {
+  async send(
+    @CurrentUser() user: KeycloakJwtPayload,
+  ): Promise<{ message: string }> {
     if (!user.email) {
       return { message: 'No email associated with this account.' };
     }

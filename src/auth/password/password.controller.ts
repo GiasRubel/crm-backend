@@ -29,6 +29,10 @@ export class PasswordController {
   @Post('reset')
   @HttpCode(HttpStatus.OK)
   reset(@Body() dto: ResetPasswordDto): Promise<{ message: string }> {
-    return this.passwordService.resetPassword(dto.email, dto.code, dto.newPassword);
+    return this.passwordService.resetPassword(
+      dto.email,
+      dto.code,
+      dto.newPassword,
+    );
   }
 }

@@ -9,6 +9,7 @@ import { MailModule } from './mail/mail.module';
 import { KeycloakAdminModule } from './keycloak-admin/keycloak-admin.module';
 import { PasswordModule } from './auth/password/password.module';
 import { CustomersModule } from './customers/customers.module';
+import { TeamsModule } from './teams/teams.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { CustomersModule } from './customers/customers.module';
     UsersModule,
     MailModule,
     PasswordModule,
+    TeamsModule,
     CustomersModule,
   ],
   controllers: [AppController],

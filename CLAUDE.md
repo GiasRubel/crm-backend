@@ -1,0 +1,126 @@
+# CRM Backend — CLAUDE.md
+
+NestJS 11 REST API for the CRM. MongoDB (Mongoose) for persistence, Keycloak for
+identity/auth. Serves the Next.js frontend in `../crm-frontend`.
+
+## Stack
+
+- **NestJS 11** (Express platform), TypeScript, `ts-jest` + Jest for tests.
+- **MongoDB** via `@nestjs/mongoose` (`Mongoose` 9). Connection from `MONGO_URI`.
+- **Keycloak** as the OIDC identity provider. The API is a resource server: it
+  validates RS256 JWTs against Keycloak's JWKS and also acts as a Keycloak *admin*
+  client to provision/update/delete users.
+- **Nodemailer** for OTP + transactional mail.
+- Config via `@nestjs/config` (`ConfigModule.forRoot({ isGlobal: true })`) — read
+  everything through `ConfigService`, never `process.env` directly in feature code
+  (`main.ts` is the one exception).
+
+## Commands (package manager: yarn — `yarn.lock` is committed)
+
+```bash
+yarn start:dev      # nest start --watch (dev)
+yarn start:prod     # node dist/main (after yarn build)
+yarn build          # nest build
+yarn lint           # eslint --fix over {src,apps,libs,test}
+yarn format         # prettier --write
+yarn test           # jest (*.spec.ts next to source, rootDir=src)
+yarn test:e2e       # jest --config ./test/jest-e2e.json
+```
+
+Runs on `PORT` (`.env` sets **5000**). CORS is locked to `FRONTEND_URL`
+(`http://localhost:3001`). Docker Compose (`docker-compose.yml`) brings up Mongo +
+Keycloak locally. See `KEYCLOAK-SETUP.md` for realm/client setup.
+
+## Architecture & conventions
+
+Standard Nest feature-module layout. Each domain folder owns its
+`*.module.ts`, `*.controller.ts`, `*.service.ts`, `*.schema.ts`, `dto/`, and
+`mappers/`.
+
+```
+src/
+  main.ts                 # bootstrap: global ValidationPipe, CORS, no-cache headers
+  app.module.ts           # root; wires Config, Mongoose, and all feature modules
+  auth/                   # JWT resource-server auth + RBAC (see below)
+    strategies/           # jwt.strategy.ts — Passport + jwks-rsa
+    guards/               # jwt-auth.guard.ts (authN), roles.guard.ts (authZ)
+    decorators/           # @Public(), @Roles(), @CurrentUser()
+    password/             # forgot/reset password flow
+  users/                  # app user records mirrored from Keycloak; AppRole enum
+  customers/              # customer CRUD + Keycloak/Mongo provisioning
+  teams/                  # teams/territories: member groups, record routing (see ../TEAMS-AND-TERRITORIES.md)
+  keycloak-admin/         # KeycloakAdminService — admin REST client (GLOBAL module)
+  otp/                    # email OTP send/verify
+  mail/                   # Nodemailer wrapper (GLOBAL)
+```
+
+### Auth model (important)
+
+- Auth is **global**. `AuthModule` registers `JwtAuthGuard` and then `RolesGuard`
+  as `APP_GUARD`s, so **every route is authenticated + role-checked by default**.
+- To expose an unauthenticated endpoint, add `@Public()` (see `app.controller.ts`).
+- `JwtStrategy` validates the token against Keycloak's JWKS (`issuer`, `RS256`,
+  cached JWKS) and rejects tokens whose `azp` ≠ `KEYCLOAK_CLIENT_ID`. The decoded
+  `KeycloakJwtPayload` is attached to `request.user`.
+- **Roles come from Mongo, not the JWT.** `RolesGuard` looks up the app user by
+  `payload.sub` (`keycloakId`) via `UsersService` and checks its `role` against the
+  `@Roles(...)` list. Roles are the `AppRole` enum: `User`, `Admin`,
+  `Administrator`, `Customer`.
+- Read the caller with `@CurrentUser() user: KeycloakJwtPayload`; the Keycloak
+  subject id is `user.sub`.
+
+### Data model
+
+- Every person exists in **three places** that must stay in sync: Keycloak
+  (identity), the Mongo `User` collection (app role + identity mirror), and — for
+  customers — the Mongo `Customer` collection (profile). `keycloakId` is the join
+  key across all three.
+- `UsersService.getOrProvisionMe` lazily provisions/syncs a `User` from JWT claims
+  on first `GET /users/me`. Staff created this way default to `AppRole.User`;
+  customers created via the customers flow get `AppRole.Customer`.
+- **Row-level visibility:** customers carry `assignedToId` (staff keycloakId) and
+  `assignedTeamId` (ref `Team`). Admin/Administrator see all records; `User` staff
+  only see records they own, records routed to one of their active teams, or
+  records they created (`CustomersService.buildVisibilityFilter`). Business rules
+  are documented in `../TEAMS-AND-TERRITORIES.md` — keep code and doc in sync.
+
+### Writing that spans Keycloak + Mongo — follow the existing pattern
+
+`CustomersService.create` is the reference implementation for multi-store writes:
+create in Keycloak first, then Mongo `User`, then Mongo `Customer`, and on any Mongo
+failure **roll back in reverse order** (delete customer doc, delete user doc, delete
+Keycloak user). `update`/`remove` propagate email/name changes to all three stores.
+When you touch a person's identity, keep all three consistent and preserve the
+rollback discipline. Email sends are best-effort: log and swallow, never fail the
+request because mail failed.
+
+### Conventions
+
+- **DTOs + validation:** every request body/query is a `class-validator` DTO. The
+  global `ValidationPipe` uses `{ whitelist: true, transform: true }`, so unknown
+  fields are stripped and query params are coerced. Add validation decorators to
+  new DTOs.
+- **Responses go through mappers.** Never return a raw Mongoose document — map to a
+  `*-response.dto.ts` via the folder's `mappers/` (e.g. `toCustomerResponseDto`).
+- **Schemas:** `@Schema({ timestamps: true })`, export `SchemaFactory.createForClass`
+  and a `HydratedDocument<T>` type alias. Normalize identity fields (`lowercase`,
+  `trim`) at the schema level.
+- **Errors:** throw Nest HTTP exceptions (`ConflictException`, `NotFoundException`,
+  `ForbiddenException`, …). Use a per-service `private readonly logger =
+  new Logger(X.name)` for logging.
+- Controllers stay thin — validate/authorize/delegate. Business logic lives in
+  services.
+
+## Gotchas
+
+- The API globally sends `Cache-Control: no-store` and disables ETags (`main.ts`) —
+  responses are intentionally uncached.
+- `KeycloakAdminModule` and `MailModule` are global; import their services without
+  re-importing the module.
+- `KeycloakAdminService` caches its admin token; it needs
+  `KEYCLOAK_ADMIN_CLIENT_ID` / `KEYCLOAK_ADMIN_CLIENT_SECRET` (a confidential
+  service-account client, distinct from the public `crm-frontend` client used to
+  validate user tokens).
+- No global route prefix is set — controllers own their full paths (e.g.
+  `@Controller('auth/otp')`). The frontend's `next.config.ts` rewrites `/api/*` to
+  this server, but backend routes are **not** under `/api`.

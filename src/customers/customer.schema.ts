@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument } from 'mongoose';
+import { HydratedDocument, Schema as MongooseSchema, Types } from 'mongoose';
 
 export type CustomerDocument = HydratedDocument<Customer>;
 
@@ -29,11 +29,27 @@ export class Customer {
   @Prop({ trim: true })
   notes?: string;
 
-  @Prop({ type: String, enum: ['active', 'inactive', 'prospect'], default: 'active' })
+  @Prop({
+    type: String,
+    enum: ['active', 'inactive', 'prospect'],
+    default: 'active',
+  })
   status: 'active' | 'inactive' | 'prospect';
 
   @Prop({ required: true, index: true })
   createdBy: string; // keycloakId of staff who created the customer
+
+  /** keycloakId of the staff user who owns this record (record owner). */
+  @Prop({ index: true })
+  assignedToId?: string;
+
+  /** Team this record is routed to; drives row-level visibility for members. */
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Team', index: true })
+  assignedTeamId?: Types.ObjectId;
+
+  // Managed by { timestamps: true }
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
 export const CustomerSchema = SchemaFactory.createForClass(Customer);

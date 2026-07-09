@@ -10,6 +10,10 @@ export class CustomerResponseDto {
   notes?: string;
   status: 'active' | 'inactive' | 'prospect';
   createdBy: string;
+  assignedToId: string | null;
+  assignedToName: string | null;
+  assignedTeamId: string | null;
+  assignedTeamName: string | null;
   createdAt: string;
   updatedAt: string;
 }
