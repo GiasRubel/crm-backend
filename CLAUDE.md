@@ -57,6 +57,7 @@ src/
   events/                 # CrmEventBus (GLOBAL) — in-process domain events; services emit after saves
   automations/            # rule engine: trigger rules + SLA idle sweep (see ../AUTOMATION-AND-WORKFLOWS-DEVELOPER.md)
   tickets/                # helpdesk: numbered tickets, comments/internal notes, customer portal (see ../SERVICE-AND-SUPPORT-DEVELOPER.md)
+  reports/                # read-only analytics: dashboards + custom report builder over all domains (see ../REPORTING-AND-ANALYTICS-DEVELOPER.md)
   kb/                     # knowledge base: internal wiki + @Public FAQ endpoints
   keycloak-admin/         # KeycloakAdminService — admin REST client (GLOBAL module)
   otp/                    # email OTP send/verify
@@ -99,7 +100,9 @@ src/
 - `AccountsModule` registers the Contact/Opportunity **schemas** directly
   (read/unlink-only: 360° summary, link counts, delete-time unlinking) instead
   of importing their modules — that direction would create a dependency cycle.
-  `ActivitiesModule` does the same for all five linkable schemas; completed
+  `ActivitiesModule` does the same for all five linkable schemas; `ReportsModule`
+  registers Opportunity/Lead/Customer/Activity/Ticket schemas read-only for its
+  analytics aggregations. Completed
   communications feed lead engagements / contact interactions
   (`syncCompletedCommunication`) — business rules in
   `../ACTIVITIES-AND-ENGAGEMENT-BUSINESS.md`.

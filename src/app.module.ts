@@ -19,6 +19,7 @@ import { EventsModule } from './events/events.module';
 import { AutomationsModule } from './automations/automations.module';
 import { KbModule } from './kb/kb.module';
 import { TicketsModule } from './tickets/tickets.module';
+import { ReportsModule } from './reports/reports.module';
 
 @Module({
   imports: [
@@ -45,6 +46,7 @@ import { TicketsModule } from './tickets/tickets.module';
     KbModule,
     TicketsModule,
     AutomationsModule,
+    ReportsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
