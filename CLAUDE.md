@@ -49,6 +49,15 @@ src/
   users/                  # app user records mirrored from Keycloak; AppRole enum
   customers/              # customer CRUD + Keycloak/Mongo provisioning
   teams/                  # teams/territories: member groups, record routing (see ../TEAMS-AND-TERRITORIES.md)
+  leads/                  # lead capture (public endpoint), scoring, qualification, conversion (see ../LEADS-AND-PIPELINE-DEVELOPER.md)
+  opportunities/          # sales pipeline: stages, Kanban board endpoint, win/loss; optional accountId link
+  accounts/               # B2B company profiles + 360° summary (see ../CONTACTS-AND-ACCOUNTS-DEVELOPER.md)
+  contacts/               # person profiles: interactions history, preferences, account/customer links
+  activities/             # tasks + communication log + ICS export (see ../ACTIVITIES-AND-ENGAGEMENT-DEVELOPER.md)
+  events/                 # CrmEventBus (GLOBAL) — in-process domain events; services emit after saves
+  automations/            # rule engine: trigger rules + SLA idle sweep (see ../AUTOMATION-AND-WORKFLOWS-DEVELOPER.md)
+  tickets/                # helpdesk: numbered tickets, comments/internal notes, customer portal (see ../SERVICE-AND-SUPPORT-DEVELOPER.md)
+  kb/                     # knowledge base: internal wiki + @Public FAQ endpoints
   keycloak-admin/         # KeycloakAdminService — admin REST client (GLOBAL module)
   otp/                    # email OTP send/verify
   mail/                   # Nodemailer wrapper (GLOBAL)
@@ -83,6 +92,22 @@ src/
   only see records they own, records routed to one of their active teams, or
   records they created (`CustomersService.buildVisibilityFilter`). Business rules
   are documented in `../TEAMS-AND-TERRITORIES.md` — keep code and doc in sync.
+  Leads, opportunities, accounts, and contacts carry the same routing fields
+  and replicate the same visibility filter in their services; business rules
+  live in `../LEADS-AND-PIPELINE-BUSINESS.md` and
+  `../CONTACTS-AND-ACCOUNTS-BUSINESS.md` (+ `-DEVELOPER.md` each).
+- `AccountsModule` registers the Contact/Opportunity **schemas** directly
+  (read/unlink-only: 360° summary, link counts, delete-time unlinking) instead
+  of importing their modules — that direction would create a dependency cycle.
+  `ActivitiesModule` does the same for all five linkable schemas; completed
+  communications feed lead engagements / contact interactions
+  (`syncCompletedCommunication`) — business rules in
+  `../ACTIVITIES-AND-ENGAGEMENT-BUSINESS.md`.
+- Deliberately `@Public()` endpoints: `POST /leads/capture` (web-form lead
+  ingestion: 202 + empty body, honeypot, dedupe) and the `GET /kb/public*` +
+  `POST /kb/public/:id/feedback` FAQ surface (published+public articles only,
+  no author metadata). `AppRole.Customer` gets the `/tickets/my*` portal
+  routes (internal notes stripped, ownership checked).
 
 ### Writing that spans Keycloak + Mongo — follow the existing pattern
 
@@ -115,8 +140,13 @@ request because mail failed.
 
 - The API globally sends `Cache-Control: no-store` and disables ETags (`main.ts`) —
   responses are intentionally uncached.
-- `KeycloakAdminModule` and `MailModule` are global; import their services without
-  re-importing the module.
+- `KeycloakAdminModule` and `EventsModule` are global; import their services
+  without re-importing the module. `MailModule` is **not** global — import it
+  where `MailService` is needed.
+- When a service mutates leads/opportunities/customers/contacts in a new way,
+  emit the matching `CrmEventBus` event after the save (see
+  `../AUTOMATION-AND-WORKFLOWS-DEVELOPER.md` §1 for the emission map and the
+  no-loop rule).
 - `KeycloakAdminService` caches its admin token; it needs
   `KEYCLOAK_ADMIN_CLIENT_ID` / `KEYCLOAK_ADMIN_CLIENT_SECRET` (a confidential
   service-account client, distinct from the public `crm-frontend` client used to

@@ -10,6 +10,15 @@ import { KeycloakAdminModule } from './keycloak-admin/keycloak-admin.module';
 import { PasswordModule } from './auth/password/password.module';
 import { CustomersModule } from './customers/customers.module';
 import { TeamsModule } from './teams/teams.module';
+import { LeadsModule } from './leads/leads.module';
+import { OpportunitiesModule } from './opportunities/opportunities.module';
+import { AccountsModule } from './accounts/accounts.module';
+import { ContactsModule } from './contacts/contacts.module';
+import { ActivitiesModule } from './activities/activities.module';
+import { EventsModule } from './events/events.module';
+import { AutomationsModule } from './automations/automations.module';
+import { KbModule } from './kb/kb.module';
+import { TicketsModule } from './tickets/tickets.module';
 
 @Module({
   imports: [
@@ -21,12 +30,21 @@ import { TeamsModule } from './teams/teams.module';
       inject: [ConfigService],
     }),
     KeycloakAdminModule, // Global — available to all modules
+    EventsModule, // Global — CrmEventBus injectable everywhere
     AuthModule,
     UsersModule,
     MailModule,
     PasswordModule,
     TeamsModule,
     CustomersModule,
+    AccountsModule,
+    ContactsModule,
+    OpportunitiesModule,
+    LeadsModule,
+    ActivitiesModule,
+    KbModule,
+    TicketsModule,
+    AutomationsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

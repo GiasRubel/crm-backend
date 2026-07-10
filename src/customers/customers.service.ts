@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { isValidObjectId, Model, Types } from 'mongoose';
+import { CrmEventBus } from '../events/crm-event-bus.service';
 import { KeycloakAdminService } from '../keycloak-admin/keycloak-admin.service';
 import { TeamDocument } from '../teams/team.schema';
 import { TeamsService } from '../teams/teams.service';
@@ -38,6 +39,7 @@ export class CustomersService {
     private readonly usersService: UsersService,
     private readonly keycloakAdminService: KeycloakAdminService,
     private readonly teamsService: TeamsService,
+    private readonly eventBus: CrmEventBus,
   ) {}
 
   async create(
@@ -131,6 +133,17 @@ export class CustomersService {
           emailError,
         );
       }
+
+      this.eventBus.emit({
+        event: 'customer.created',
+        recordType: 'customer',
+        recordId: createdCustomerDoc._id.toString(),
+        record: createdCustomerDoc.toObject() as unknown as Record<
+          string,
+          unknown
+        >,
+        context: {},
+      });
 
       return await this.mapOne(createdCustomerDoc);
     } catch (error) {
@@ -495,6 +508,37 @@ export class CustomersService {
     await this.keycloakAdminService.sendSetPasswordEmail(customer.keycloakId);
     this.logger.log(
       `Resent password setup email to customer ${customer.email}`,
+    );
+  }
+
+  // ── Cross-module lookups (used by opportunities/leads) ─────────────────
+
+  /** Raw document lookup for other modules; null for malformed/unknown ids. */
+  async findDocById(id: string): Promise<CustomerDocument | null> {
+    if (!isValidObjectId(id)) return null;
+    return this.customerModel.findById(id).exec();
+  }
+
+  /** Portal identity → customer document (used by the tickets portal). */
+  async findDocByKeycloakId(
+    keycloakId: string,
+  ): Promise<CustomerDocument | null> {
+    return this.customerModel.findOne({ keycloakId }).exec();
+  }
+
+  /** Map of customer id → display name for response denormalization. */
+  async findNamesByIds(ids: string[]): Promise<Map<string, string>> {
+    if (ids.length === 0) return new Map();
+    const customers = await this.customerModel
+      .find({ _id: { $in: ids } })
+      .select('firstName lastName company')
+      .exec();
+    return new Map(
+      customers.map((c) => [
+        c._id.toString(),
+        `${c.firstName} ${c.lastName}`.trim() +
+          (c.company ? ` (${c.company})` : ''),
+      ]),
     );
   }
 

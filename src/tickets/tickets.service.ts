@@ -1,0 +1,762 @@
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { isValidObjectId, Model, Types } from 'mongoose';
+import { CustomersService } from '../customers/customers.service';
+import { CrmEventBus } from '../events/crm-event-bus.service';
+import { KbService } from '../kb/kb.service';
+import { TeamDocument } from '../teams/team.schema';
+import { TeamsService } from '../teams/teams.service';
+import { AppRole } from '../users/app-role.enum';
+import { UsersService } from '../users/users.service';
+import {
+  AddMyTicketCommentDto,
+  AddTicketCommentDto,
+} from './dto/add-comment.dto';
+import { AssignTicketDto } from './dto/assign-ticket.dto';
+import { CreateMyTicketDto, CreateTicketDto } from './dto/create-ticket.dto';
+import { TicketQueryDto } from './dto/ticket-query.dto';
+import { TicketResponseDto, TicketStatsDto } from './dto/ticket-response.dto';
+import { SetTicketStatusDto } from './dto/ticket-status.dto';
+import { UpdateTicketDto } from './dto/update-ticket.dto';
+import { toTicketResponseDto } from './mappers/ticket.mapper';
+import {
+  ACTIVE_TICKET_STATUSES,
+  Ticket,
+  TicketCounter,
+  TicketCounterDocument,
+  TicketDocument,
+  TicketStatus,
+} from './ticket.schema';
+
+/** Escape user input so it can be safely embedded in a RegExp. */
+function escapeRegExp(input: string): string {
+  return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+@Injectable()
+export class TicketsService {
+  private readonly logger = new Logger(TicketsService.name);
+
+  constructor(
+    @InjectModel(Ticket.name)
+    private readonly ticketModel: Model<TicketDocument>,
+    @InjectModel(TicketCounter.name)
+    private readonly counterModel: Model<TicketCounterDocument>,
+    private readonly usersService: UsersService,
+    private readonly teamsService: TeamsService,
+    private readonly customersService: CustomersService,
+    private readonly kbService: KbService,
+    private readonly eventBus: CrmEventBus,
+  ) {}
+
+  // ── Staff: create / read ────────────────────────────────────────────────
+
+  async create(
+    dto: CreateTicketDto,
+    createdBy: string,
+  ): Promise<TicketResponseDto> {
+    const customer = await this.customersService.findDocById(dto.customerId);
+    if (!customer) {
+      throw new BadRequestException('Customer not found');
+    }
+
+    const assignment = await this.resolveAssignmentTargets(
+      dto.assignedToId,
+      dto.assignedTeamId,
+    );
+
+    const ticket = await this.ticketModel.create({
+      number: await this.nextTicketNumber(),
+      subject: dto.subject.trim(),
+      description: dto.description.trim(),
+      type: dto.type ?? 'question',
+      priority: dto.priority ?? 'normal',
+      customerId: customer._id,
+      createdBy,
+      ...assignment,
+    });
+
+    this.logger.log(`Ticket created: ${ticket.number} "${ticket.subject}"`);
+    this.emitTicketEvent('ticket.created', ticket);
+    return this.mapOne(ticket);
+  }
+
+  async findAll(query: TicketQueryDto, requesterKeycloakId: string) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 10;
+    const skip = (page - 1) * limit;
+
+    const conditions: Record<string, unknown>[] = [];
+
+    if (query.search?.trim()) {
+      const searchRegex = new RegExp(escapeRegExp(query.search.trim()), 'i');
+      conditions.push({
+        $or: [
+          { number: searchRegex },
+          { subject: searchRegex },
+          { description: searchRegex },
+        ],
+      });
+    }
+    if (query.status) conditions.push({ status: query.status });
+    if (query.openOnly === 'true')
+      conditions.push({ status: { $ne: 'closed' } });
+    if (query.type) conditions.push({ type: query.type });
+    if (query.priority) conditions.push({ priority: query.priority });
+    if (query.customerId)
+      conditions.push({ customerId: new Types.ObjectId(query.customerId) });
+    if (query.assignedToId)
+      conditions.push({ assignedToId: query.assignedToId });
+    if (query.unassigned === 'true')
+      conditions.push({ assignedToId: { $exists: false } });
+
+    const visibility = await this.buildVisibilityFilter(requesterKeycloakId);
+    if (visibility) conditions.push(visibility);
+
+    const filter: Record<string, unknown> =
+      conditions.length === 0
+        ? {}
+        : conditions.length === 1
+          ? conditions[0]
+          : { $and: conditions };
+
+    const sortBy = query.sortBy ?? 'updatedAt';
+    const direction = query.sortOrder === 'asc' ? 1 : -1;
+    // Secondary _id sort keeps pagination stable when the primary key has ties
+    const sort: Record<string, 1 | -1> = {
+      [sortBy]: direction,
+      _id: direction,
+    };
+
+    const [items, total] = await Promise.all([
+      this.ticketModel.find(filter).sort(sort).skip(skip).limit(limit).exec(),
+      this.ticketModel.countDocuments(filter).exec(),
+    ]);
+
+    return {
+      data: await this.mapMany(items),
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
+      },
+    };
+  }
+
+  async getStats(requesterKeycloakId: string): Promise<TicketStatsDto> {
+    const startOfMonth = new Date();
+    startOfMonth.setDate(1);
+    startOfMonth.setHours(0, 0, 0, 0);
+
+    const visibility =
+      (await this.buildVisibilityFilter(requesterKeycloakId)) ?? {};
+
+    const [
+      byStatus,
+      unassigned,
+      urgent,
+      awaitingFirstResponse,
+      resolvedThisMonth,
+      responseAgg,
+    ] = await Promise.all([
+      this.ticketModel
+        .aggregate<{
+          _id: string;
+          count: number;
+        }>([
+          { $match: visibility },
+          { $group: { _id: '$status', count: { $sum: 1 } } },
+        ])
+        .exec(),
+      this.ticketModel
+        .countDocuments({
+          ...visibility,
+          status: { $ne: 'closed' },
+          assignedToId: { $exists: false },
+        })
+        .exec(),
+      this.ticketModel
+        .countDocuments({
+          ...visibility,
+          status: { $in: ACTIVE_TICKET_STATUSES },
+          priority: 'urgent',
+        })
+        .exec(),
+      this.ticketModel
+        .countDocuments({
+          ...visibility,
+          status: { $in: ACTIVE_TICKET_STATUSES },
+          firstResponseAt: { $exists: false },
+        })
+        .exec(),
+      this.ticketModel
+        .countDocuments({
+          ...visibility,
+          resolvedAt: { $gte: startOfMonth },
+        })
+        .exec(),
+      this.ticketModel
+        .aggregate<{ _id: null; avgMs: number }>([
+          {
+            $match: {
+              ...visibility,
+              firstResponseAt: { $gte: startOfMonth },
+            },
+          },
+          {
+            $group: {
+              _id: null,
+              avgMs: {
+                $avg: { $subtract: ['$firstResponseAt', '$createdAt'] },
+              },
+            },
+          },
+        ])
+        .exec(),
+    ]);
+
+    const counts = Object.fromEntries(byStatus.map((s) => [s._id, s.count]));
+    const avgMs = responseAgg[0]?.avgMs;
+
+    return {
+      open: counts['open'] ?? 0,
+      inProgress: counts['in_progress'] ?? 0,
+      waitingOnCustomer: counts['waiting_on_customer'] ?? 0,
+      unassigned,
+      urgent,
+      awaitingFirstResponse,
+      resolvedThisMonth,
+      avgFirstResponseHours:
+        avgMs === undefined || avgMs === null
+          ? null
+          : Math.round((avgMs / 36e5) * 10) / 10,
+    };
+  }
+
+  async findOne(
+    id: string,
+    requesterKeycloakId: string,
+  ): Promise<TicketResponseDto> {
+    const ticket = await this.getByIdOrFail(id);
+    await this.assertCanView(ticket, requesterKeycloakId);
+    return this.mapOne(ticket);
+  }
+
+  // ── Staff: update / status / comments / routing / delete ───────────────
+
+  async update(
+    id: string,
+    dto: UpdateTicketDto,
+    requesterKeycloakId: string,
+  ): Promise<TicketResponseDto> {
+    const ticket = await this.getByIdOrFail(id);
+    await this.assertCanView(ticket, requesterKeycloakId);
+
+    if (dto.subject !== undefined) ticket.subject = dto.subject.trim();
+    if (dto.description !== undefined)
+      ticket.description = dto.description.trim();
+    if (dto.type !== undefined) ticket.type = dto.type;
+    if (dto.priority !== undefined) ticket.priority = dto.priority;
+
+    if (dto.relatedArticleIds !== undefined) {
+      for (const articleId of dto.relatedArticleIds) {
+        if (!(await this.kbService.existsById(articleId))) {
+          throw new BadRequestException(
+            `Linked article ${articleId} not found`,
+          );
+        }
+      }
+      ticket.relatedArticleIds = dto.relatedArticleIds.map(
+        (a) => new Types.ObjectId(a),
+      );
+    }
+
+    await ticket.save();
+    this.logger.log(`Ticket updated: ${ticket.number}`);
+    return this.mapOne(ticket);
+  }
+
+  /** Status workflow; stamps resolved/closed timestamps and emits events. */
+  async setStatus(
+    id: string,
+    dto: SetTicketStatusDto,
+    requesterKeycloakId: string,
+  ): Promise<TicketResponseDto> {
+    const ticket = await this.getByIdOrFail(id);
+    await this.assertCanView(ticket, requesterKeycloakId);
+    if (ticket.status === dto.status) return this.mapOne(ticket);
+
+    this.applyStatus(ticket, dto.status);
+    await ticket.save();
+
+    this.logger.log(`Ticket ${ticket.number} status → ${dto.status}`);
+    return this.mapOne(ticket);
+  }
+
+  /** Staff comment. First public reply stamps the first-response time. */
+  async addComment(
+    id: string,
+    dto: AddTicketCommentDto,
+    requesterKeycloakId: string,
+  ): Promise<TicketResponseDto> {
+    const ticket = await this.getByIdOrFail(id);
+    await this.assertCanView(ticket, requesterKeycloakId);
+    if (ticket.status === 'closed') {
+      throw new BadRequestException(
+        'This ticket is closed — reopen it to continue the conversation',
+      );
+    }
+
+    const isInternal = dto.isInternal ?? false;
+    ticket.comments.push({
+      authorId: requesterKeycloakId,
+      authorRole: 'staff',
+      body: dto.body.trim(),
+      isInternal,
+      postedAt: new Date(),
+    });
+
+    if (!isInternal) {
+      if (!ticket.firstResponseAt) ticket.firstResponseAt = new Date();
+      // A public staff reply on a fresh ticket means work has started
+      if (ticket.status === 'open') this.applyStatus(ticket, 'in_progress');
+    }
+
+    await ticket.save();
+    return this.mapOne(ticket);
+  }
+
+  /**
+   * Record routing: set or clear the ticket owner and/or the assigned team.
+   * Omitted fields are unchanged; null clears a field.
+   */
+  async assign(id: string, dto: AssignTicketDto): Promise<TicketResponseDto> {
+    const ticket = await this.getByIdOrFail(id);
+
+    const sets: Record<string, unknown> = {};
+    const unsets: Record<string, ''> = {};
+    let targetTeam: TeamDocument | null | undefined;
+
+    if (dto.assignedTeamId !== undefined) {
+      if (dto.assignedTeamId === null) {
+        unsets.assignedTeamId = '';
+        targetTeam = null;
+      } else {
+        targetTeam = await this.getActiveTeamOrFail(dto.assignedTeamId);
+        sets.assignedTeamId = targetTeam._id;
+      }
+    }
+
+    if (dto.assignedToId !== undefined) {
+      if (dto.assignedToId === null) {
+        unsets.assignedToId = '';
+      } else {
+        await this.getStaffUserOrFail(dto.assignedToId);
+        sets.assignedToId = dto.assignedToId;
+      }
+    }
+
+    if (Object.keys(sets).length === 0 && Object.keys(unsets).length === 0) {
+      return this.mapOne(ticket);
+    }
+
+    // Consistency rule: when the record ends up with both an owner and a
+    // team, the owner must be a member of that team.
+    const finalOwner =
+      dto.assignedToId === undefined
+        ? (ticket.assignedToId ?? null)
+        : dto.assignedToId;
+    const finalTeam =
+      targetTeam !== undefined
+        ? targetTeam
+        : ticket.assignedTeamId
+          ? await this.teamsService.findDocById(
+              ticket.assignedTeamId.toString(),
+            )
+          : null;
+
+    if (finalOwner && finalTeam && !finalTeam.memberIds.includes(finalOwner)) {
+      throw new BadRequestException(
+        'Ticket owner must be a member of the assigned team',
+      );
+    }
+
+    const updated = await this.ticketModel
+      .findByIdAndUpdate(
+        id,
+        {
+          ...(Object.keys(sets).length > 0 ? { $set: sets } : {}),
+          ...(Object.keys(unsets).length > 0 ? { $unset: unsets } : {}),
+        },
+        { new: true },
+      )
+      .orFail()
+      .exec();
+
+    this.logger.log(
+      `Ticket ${updated.number} routed: owner=${updated.assignedToId ?? 'none'}, team=${updated.assignedTeamId?.toString() ?? 'none'}`,
+    );
+    return this.mapOne(updated);
+  }
+
+  async remove(id: string): Promise<void> {
+    const ticket = await this.getByIdOrFail(id);
+    await this.ticketModel.deleteOne({ _id: ticket._id }).exec();
+    this.logger.log(`Ticket deleted: ${ticket.number}`);
+  }
+
+  // ── Customer portal (AppRole.Customer) ──────────────────────────────────
+
+  /** Portal customer raises a ticket for themselves. */
+  async createMy(
+    dto: CreateMyTicketDto,
+    customerKeycloakId: string,
+  ): Promise<TicketResponseDto> {
+    const customer = await this.getPortalCustomerOrFail(customerKeycloakId);
+
+    const ticket = await this.ticketModel.create({
+      number: await this.nextTicketNumber(),
+      subject: dto.subject.trim(),
+      description: dto.description.trim(),
+      type: dto.type ?? 'question',
+      priority: 'normal',
+      customerId: customer._id,
+      createdBy: customerKeycloakId,
+      // Inherit the customer's routing so the right team sees it at once
+      ...(customer.assignedToId ? { assignedToId: customer.assignedToId } : {}),
+      ...(customer.assignedTeamId
+        ? { assignedTeamId: customer.assignedTeamId }
+        : {}),
+    });
+
+    this.logger.log(
+      `Ticket ${ticket.number} raised via portal by ${customer.email}`,
+    );
+    this.emitTicketEvent('ticket.created', ticket);
+    return this.mapOne(ticket, { forCustomer: true });
+  }
+
+  /** The signed-in customer's own tickets (internal notes stripped). */
+  async findMy(customerKeycloakId: string): Promise<TicketResponseDto[]> {
+    const customer = await this.getPortalCustomerOrFail(customerKeycloakId);
+    const tickets = await this.ticketModel
+      .find({ customerId: customer._id })
+      .sort({ updatedAt: -1, _id: -1 })
+      .limit(100)
+      .exec();
+    return this.mapMany(tickets, { forCustomer: true });
+  }
+
+  async findMyOne(
+    id: string,
+    customerKeycloakId: string,
+  ): Promise<TicketResponseDto> {
+    const { ticket } = await this.getOwnTicketOrFail(id, customerKeycloakId);
+    return this.mapOne(ticket, { forCustomer: true });
+  }
+
+  /**
+   * Customer reply. Waiting-on-customer flips back to in-progress; a reply
+   * on a resolved ticket reopens it. Closed tickets are immutable.
+   */
+  async addMyComment(
+    id: string,
+    dto: AddMyTicketCommentDto,
+    customerKeycloakId: string,
+  ): Promise<TicketResponseDto> {
+    const { ticket } = await this.getOwnTicketOrFail(id, customerKeycloakId);
+    if (ticket.status === 'closed') {
+      throw new BadRequestException(
+        'This ticket is closed — please open a new ticket',
+      );
+    }
+
+    ticket.comments.push({
+      authorId: customerKeycloakId,
+      authorRole: 'customer',
+      body: dto.body.trim(),
+      isInternal: false,
+      postedAt: new Date(),
+    });
+
+    if (ticket.status === 'waiting_on_customer') {
+      this.applyStatus(ticket, 'in_progress');
+    } else if (ticket.status === 'resolved') {
+      this.applyStatus(ticket, 'open'); // not fixed after all
+    }
+
+    await ticket.save();
+    return this.mapOne(ticket, { forCustomer: true });
+  }
+
+  // ── Status helper (single place for stamps + events) ───────────────────
+
+  private applyStatus(ticket: TicketDocument, status: TicketStatus): void {
+    const previousStatus = ticket.status;
+    ticket.status = status;
+
+    if (status === 'resolved') {
+      ticket.resolvedAt = new Date();
+    } else if (status === 'closed') {
+      ticket.closedAt = ticket.closedAt ?? new Date();
+    } else {
+      ticket.resolvedAt = status === 'open' ? undefined : ticket.resolvedAt;
+      ticket.closedAt = undefined;
+    }
+
+    this.emitTicketEvent('ticket.status_changed', ticket, {
+      previousStatus,
+      newStatus: status,
+    });
+  }
+
+  private emitTicketEvent(
+    event: 'ticket.created' | 'ticket.status_changed',
+    ticket: TicketDocument,
+    context: Record<string, unknown> = {},
+  ): void {
+    this.eventBus.emit({
+      event,
+      recordType: 'ticket',
+      recordId: ticket._id.toString(),
+      record: ticket.toObject() as unknown as Record<string, unknown>,
+      context,
+    });
+  }
+
+  // ── Row-level visibility (staff; same model as CustomersService) ───────
+
+  private async buildVisibilityFilter(
+    keycloakId: string,
+  ): Promise<Record<string, unknown> | null> {
+    const appUser = await this.usersService.findByKeycloakId(keycloakId);
+    if (!appUser) {
+      throw new ForbiddenException('No app user record for this account');
+    }
+
+    if (
+      appUser.role === AppRole.Admin ||
+      appUser.role === AppRole.Administrator
+    ) {
+      return null;
+    }
+
+    const teamIds = await this.teamsService.getTeamIdsForMember(keycloakId);
+    return {
+      $or: [
+        { assignedToId: keycloakId },
+        { assignedTeamId: { $in: teamIds } },
+        { createdBy: keycloakId },
+        // Support triage: unowned tickets are visible to all staff
+        { assignedToId: { $exists: false } },
+      ],
+    };
+  }
+
+  /** 404 (not 403) outside the caller's scope, to avoid leaking existence. */
+  private async assertCanView(
+    ticket: TicketDocument,
+    keycloakId: string,
+  ): Promise<void> {
+    const appUser = await this.usersService.findByKeycloakId(keycloakId);
+    if (!appUser) {
+      throw new ForbiddenException('No app user record for this account');
+    }
+    if (
+      appUser.role === AppRole.Admin ||
+      appUser.role === AppRole.Administrator
+    ) {
+      return;
+    }
+    if (
+      ticket.assignedToId === keycloakId ||
+      ticket.createdBy === keycloakId ||
+      !ticket.assignedToId // unowned = triage queue, visible to all staff
+    ) {
+      return;
+    }
+    if (ticket.assignedTeamId) {
+      const teamIds = await this.teamsService.getTeamIdsForMember(keycloakId);
+      if (teamIds.some((teamId) => teamId.equals(ticket.assignedTeamId))) {
+        return;
+      }
+    }
+    throw new NotFoundException(
+      `Ticket with ID ${ticket._id.toString()} not found`,
+    );
+  }
+
+  // ── Helpers ─────────────────────────────────────────────────────────────
+
+  /** Atomic counter → TKT-1001, TKT-1002, … */
+  private async nextTicketNumber(): Promise<string> {
+    const counter = await this.counterModel
+      .findOneAndUpdate(
+        { _id: 'ticket' },
+        { $inc: { seq: 1 } },
+        { upsert: true, new: true },
+      )
+      .exec();
+    return `TKT-${counter.seq}`;
+  }
+
+  private async getPortalCustomerOrFail(keycloakId: string) {
+    const customer =
+      await this.customersService.findDocByKeycloakId(keycloakId);
+    if (!customer) {
+      throw new ForbiddenException(
+        'No customer profile is linked to this account',
+      );
+    }
+    return customer;
+  }
+
+  private async getOwnTicketOrFail(id: string, customerKeycloakId: string) {
+    const customer = await this.getPortalCustomerOrFail(customerKeycloakId);
+    const ticket = await this.getByIdOrFail(id);
+    if (!ticket.customerId.equals(customer._id)) {
+      throw new NotFoundException(`Ticket with ID ${id} not found`);
+    }
+    return { ticket, customer };
+  }
+
+  /** Validate optional routing targets on staff ticket creation. */
+  private async resolveAssignmentTargets(
+    assignedToId?: string,
+    assignedTeamId?: string,
+  ): Promise<{ assignedToId?: string; assignedTeamId?: Types.ObjectId }> {
+    const result: { assignedToId?: string; assignedTeamId?: Types.ObjectId } =
+      {};
+
+    let team: TeamDocument | null = null;
+    if (assignedTeamId) {
+      team = await this.getActiveTeamOrFail(assignedTeamId);
+      result.assignedTeamId = team._id;
+    }
+
+    if (assignedToId) {
+      await this.getStaffUserOrFail(assignedToId);
+      if (team && !team.memberIds.includes(assignedToId)) {
+        throw new BadRequestException(
+          'Ticket owner must be a member of the assigned team',
+        );
+      }
+      result.assignedToId = assignedToId;
+    }
+
+    return result;
+  }
+
+  private async getActiveTeamOrFail(teamId: string): Promise<TeamDocument> {
+    const team = await this.teamsService.findDocById(teamId);
+    if (!team) {
+      throw new BadRequestException('Assigned team not found');
+    }
+    if (!team.isActive) {
+      throw new BadRequestException(
+        'Records cannot be routed to an inactive team',
+      );
+    }
+    return team;
+  }
+
+  private async getStaffUserOrFail(keycloakId: string): Promise<void> {
+    const [owner] = await this.usersService.findStaffByKeycloakIds([
+      keycloakId,
+    ]);
+    if (!owner) {
+      throw new BadRequestException(
+        'Ticket owner must be an existing staff user',
+      );
+    }
+  }
+
+  // ── Mapping ─────────────────────────────────────────────────────────────
+
+  private async mapOne(
+    ticket: TicketDocument,
+    options: { forCustomer?: boolean } = {},
+  ): Promise<TicketResponseDto> {
+    const [dto] = await this.mapMany([ticket], options);
+    return dto;
+  }
+
+  /** Batch-denormalize names + article titles; strips internal notes for customers. */
+  private async mapMany(
+    tickets: TicketDocument[],
+    options: { forCustomer?: boolean } = {},
+  ): Promise<TicketResponseDto[]> {
+    if (tickets.length === 0) return [];
+
+    const staffIds = [
+      ...new Set(
+        tickets
+          .flatMap((t) => [
+            t.assignedToId,
+            ...t.comments
+              .filter((c) => c.authorRole === 'staff')
+              .map((c) => c.authorId),
+          ])
+          .filter((v): v is string => !!v),
+      ),
+    ];
+    const teamIds = [
+      ...new Set(
+        tickets
+          .map((t) => t.assignedTeamId?.toString())
+          .filter((v): v is string => !!v),
+      ),
+    ];
+    const customerIds = [
+      ...new Set(tickets.map((t) => t.customerId.toString())),
+    ];
+    const articleIds = [
+      ...new Set(
+        tickets.flatMap((t) => t.relatedArticleIds.map((a) => a.toString())),
+      ),
+    ];
+
+    const [staff, teamNames, customerNames, articleTitles] = await Promise.all([
+      this.usersService.findStaffByKeycloakIds(staffIds),
+      this.teamsService.findNamesByIds(teamIds),
+      this.customersService.findNamesByIds(customerIds),
+      this.kbService.findTitlesByIds(articleIds),
+    ]);
+
+    const staffNames = new Map(
+      staff.map((u) => [
+        u.keycloakId,
+        `${u.firstName ?? ''} ${u.lastName ?? ''}`.trim() || u.email,
+      ]),
+    );
+
+    return tickets.map((t) =>
+      toTicketResponseDto(t, {
+        staffNames,
+        teamNames,
+        customerNames,
+        articleTitles,
+        forCustomer: options.forCustomer ?? false,
+      }),
+    );
+  }
+
+  /** Load a ticket by id, rejecting malformed ids with a 404 instead of a Mongoose CastError (500). */
+  private async getByIdOrFail(id: string): Promise<TicketDocument> {
+    if (!isValidObjectId(id)) {
+      throw new NotFoundException(`Ticket with ID ${id} not found`);
+    }
+    const ticket = await this.ticketModel.findById(id).exec();
+    if (!ticket) {
+      throw new NotFoundException(`Ticket with ID ${id} not found`);
+    }
+    return ticket;
+  }
+}

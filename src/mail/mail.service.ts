@@ -59,4 +59,19 @@ export class MailService {
       throw error;
     }
   }
+
+  /** Generic plain-text mail (used by automation send_email actions). */
+  async sendPlain(to: string, subject: string, text: string): Promise<void> {
+    try {
+      await this.transporter.sendMail({
+        from: `"${this.fromName}" <${this.fromAddress}>`,
+        to,
+        subject,
+        text,
+      });
+    } catch (error) {
+      this.logger.error(`Failed to send email to ${to}`, error);
+      throw error;
+    }
+  }
 }
