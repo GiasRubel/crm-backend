@@ -1,65 +1,102 @@
 @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap');
 
+/* ================================================================== */
+/*  CRM Pro — Keycloak login theme                                     */
+/*  Fully responsive (mobile → desktop), dark glassmorphism to match   */
+/*  the CRM Pro frontend.                                              */
+/* ================================================================== */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  min-height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden;
+}
+
 /* Main Body & Background */
 body {
   font-family: 'Outfit', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   background-color: #030712 !important; /* Tailwind slate-950 */
-  background-image: 
+  background-image:
     radial-gradient(circle at 10% 20%, rgba(99, 102, 241, 0.15) 0%, transparent 40%),
     radial-gradient(circle at 90% 80%, rgba(16, 185, 129, 0.08) 0%, transparent 45%),
     radial-gradient(circle at 50% 50%, rgba(99, 102, 241, 0.04) 0%, transparent 50%) !important;
   background-attachment: fixed !important;
+  background-repeat: no-repeat !important;
+  background-size: cover !important;
   color: #f1f5f9 !important; /* Tailwind slate-100 */
   min-height: 100vh;
-  margin: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }
 
-/* Hide default Keycloak background properties if any */
-.login-pf-page {
+/* Full-bleed, always-centered page wrapper (fixes the "letterboxed" look
+   on medium screens where Keycloak's container had a fixed width). */
+.login-pf-page,
+#kc-container,
+#kc-container-wrapper {
   background: transparent !important;
-  padding: 0 !important;
+  width: 100% !important;
+  max-width: 100% !important;
   margin: 0 !important;
+  float: none !important;
+  padding: 0 !important;
+}
+
+.login-pf-page {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-height: 100vh !important;
+  padding: 32px 16px !important;
 }
 
 /* Card Container */
-#kc-card-wrapper, .card-pf {
+#kc-card-wrapper,
+.card-pf {
   background: rgba(15, 23, 42, 0.65) !important; /* Dark Slate transparent */
   backdrop-filter: blur(24px) saturate(180%) !important;
   -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
   border: 1px solid rgba(255, 255, 255, 0.08) !important;
   border-radius: 28px !important;
-  box-shadow: 
+  box-shadow:
     0 4px 6px -1px rgba(0, 0, 0, 0.1),
     0 20px 40px -10px rgba(0, 0, 0, 0.5),
     inset 0 1px 0px 0px rgba(255, 255, 255, 0.1) !important;
   padding: 40px !important;
-  max-width: 440px !important;
   width: 100% !important;
-  margin: 20px auto !important;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  max-width: 440px !important;
+  margin: 0 auto !important;
+  float: none !important;
+  transition: border-color 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
 }
 
 /* Card Hover effect */
 .card-pf:hover {
   border-color: rgba(99, 102, 241, 0.25) !important;
-  box-shadow: 
+  box-shadow:
     0 0 50px -10px rgba(99, 102, 241, 0.15),
     0 25px 50px -12px rgba(0, 0, 0, 0.6),
     inset 0 1px 0px 0px rgba(255, 255, 255, 0.15) !important;
 }
 
 /* Logo & Header */
-#kc-header, #kc-header-wrapper {
-  display: none !important; /* Hide keycloak header as we build custom logo on card */
+#kc-header,
+#kc-header-wrapper {
+  display: none !important; /* Hide keycloak header — we build the logo on the card */
 }
 
 /* Title on the form card */
 #kc-page-title {
   font-family: 'Outfit', sans-serif !important;
-  font-size: 28px !important;
+  font-size: 26px !important;
   font-weight: 800 !important;
   text-align: center !important;
   letter-spacing: -0.03em !important;
@@ -68,6 +105,7 @@ body {
   color: #ffffff !important;
   background: linear-gradient(to right, #ffffff, #c7d2fe, #e2e8f0);
   -webkit-background-clip: text;
+  background-clip: text;
   -webkit-text-fill-color: transparent;
 }
 
@@ -85,7 +123,7 @@ body {
   justify-content: center !important;
   border-radius: 16px !important;
   margin: 0 auto 20px auto !important;
-  box-shadow: 
+  box-shadow:
     0 10px 20px -5px rgba(99, 102, 241, 0.5),
     inset 0 1px 0px 0px rgba(255, 255, 255, 0.3) !important;
   border: 1px solid rgba(255, 255, 255, 0.1) !important;
@@ -96,7 +134,9 @@ body {
   margin-bottom: 20px !important;
 }
 
-label.control-label {
+label.control-label,
+.pf-c-form__label,
+.pf-c-form__label-text {
   font-size: 13px !important;
   font-weight: 600 !important;
   text-transform: uppercase !important;
@@ -106,7 +146,9 @@ label.control-label {
   display: block !important;
 }
 
-input.form-control {
+input.form-control,
+input.pf-c-form-control,
+.pf-c-form-control {
   background-color: rgba(15, 23, 42, 0.6) !important;
   border: 1px solid rgba(255, 255, 255, 0.1) !important;
   border-radius: 14px !important;
@@ -116,22 +158,61 @@ input.form-control {
   font-weight: 500 !important;
   height: auto !important;
   width: 100% !important;
-  box-sizing: border-box !important;
-  transition: all 0.2s ease !important;
+  transition: border-color 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease !important;
   box-shadow: inset 0 2px 4px 0 rgba(0, 0, 0, 0.06) !important;
 }
 
-input.form-control:focus {
+input.form-control:focus,
+input.pf-c-form-control:focus,
+.pf-c-form-control:focus {
   border-color: #6366f1 !important;
   background-color: rgba(15, 23, 42, 0.8) !important;
-  box-shadow: 
+  box-shadow:
     0 0 0 4px rgba(99, 102, 241, 0.15),
     inset 0 2px 4px 0 rgba(0, 0, 0, 0.06) !important;
   outline: none !important;
 }
 
+/* Password field + show/hide (eye) toggle — keep them on one aligned row */
+.pf-c-input-group,
+div[class*="kc-input-group"] {
+  display: flex !important;
+  align-items: stretch !important;
+  gap: 8px !important;
+  width: 100% !important;
+}
+
+.pf-c-input-group .pf-c-form-control {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+}
+
+.pf-c-input-group .pf-c-button,
+button[aria-label*="password" i],
+button[data-password-toggle] {
+  flex: 0 0 auto !important;
+  width: 52px !important;
+  border-radius: 14px !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  background-color: rgba(15, 23, 42, 0.6) !important;
+  color: #94a3b8 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  cursor: pointer !important;
+  transition: color 0.15s ease, border-color 0.15s ease !important;
+}
+
+.pf-c-input-group .pf-c-button:hover,
+button[aria-label*="password" i]:hover {
+  color: #c7d2fe !important;
+  border-color: rgba(99, 102, 241, 0.4) !important;
+}
+
 /* Primary Button styling */
-.btn-primary {
+.btn-primary,
+input[type="submit"].btn,
+.pf-c-button.pf-m-primary {
   background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%) !important;
   border: 1px solid rgba(255, 255, 255, 0.1) !important;
   border-radius: 14px !important;
@@ -141,29 +222,34 @@ input.form-control:focus {
   padding: 14px 20px !important;
   width: 100% !important;
   cursor: pointer !important;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
-  box-shadow: 
+  transition: background 0.2s ease, box-shadow 0.2s ease, transform 0.1s ease !important;
+  box-shadow:
     0 4px 12px rgba(99, 102, 241, 0.25),
     inset 0 1px 0px 0px rgba(255, 255, 255, 0.2) !important;
   margin-top: 10px !important;
 }
 
-.btn-primary:hover {
+.btn-primary:hover,
+.pf-c-button.pf-m-primary:hover {
   background: linear-gradient(135deg, #4f46e5 0%, #4338ca 100%) !important;
-  box-shadow: 
+  box-shadow:
     0 6px 20px rgba(99, 102, 241, 0.35),
     inset 0 1px 0px 0px rgba(255, 255, 255, 0.2) !important;
   transform: translateY(-1px) !important;
 }
 
-.btn-primary:active {
+.btn-primary:active,
+.pf-c-button.pf-m-primary:active {
   transform: translateY(1px) !important;
   box-shadow: 0 2px 8px rgba(99, 102, 241, 0.2) !important;
 }
 
 /* Checkbox & Forgot Password row */
+#kc-form-options,
 .login-pf-settings {
   display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 8px 16px !important;
   justify-content: space-between !important;
   align-items: center !important;
   font-size: 14px !important;
@@ -171,6 +257,7 @@ input.form-control:focus {
   color: #94a3b8 !important;
 }
 
+#kc-form-options a,
 .login-pf-settings a {
   color: #818cf8 !important; /* violet-400 */
   text-decoration: none !important;
@@ -178,6 +265,7 @@ input.form-control:focus {
   transition: color 0.15s ease !important;
 }
 
+#kc-form-options a:hover,
 .login-pf-settings a:hover {
   color: #a5b4fc !important;
   text-decoration: underline !important;
@@ -200,8 +288,94 @@ input.form-control:focus {
   cursor: pointer !important;
 }
 
+/* ------------------------------------------------------------------ */
+/*  Social / Identity provider buttons (Google, Facebook, …)          */
+/* ------------------------------------------------------------------ */
+#kc-social-providers {
+  margin-top: 24px !important;
+  padding-top: 22px !important;
+  border-top: 1px solid rgba(255, 255, 255, 0.06) !important;
+}
+
+#kc-social-providers > h2,
+#kc-social-providers > h4 {
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.08em !important;
+  text-align: center !important;
+  color: #64748b !important;
+  margin: 0 0 16px 0 !important;
+}
+
+#kc-social-providers hr {
+  display: none !important;
+}
+
+#kc-social-providers ul {
+  list-style: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 10px !important;
+}
+
+/* If there is only one provider, let it span the full width */
+#kc-social-providers ul li:only-child {
+  grid-column: 1 / -1 !important;
+}
+
+#kc-social-providers li {
+  list-style: none !important;
+  margin: 0 !important;
+}
+
+#kc-social-providers a,
+#kc-social-providers .pf-c-button,
+.zocial {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 8px !important;
+  width: 100% !important;
+  min-height: 48px !important;
+  padding: 12px 14px !important;
+  border-radius: 14px !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  background: rgba(255, 255, 255, 0.04) !important;
+  color: #e2e8f0 !important;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  text-decoration: none !important;
+  cursor: pointer !important;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease !important;
+  /* neutralise zocial's default coloured button skins */
+  text-shadow: none !important;
+  box-shadow: none !important;
+}
+
+#kc-social-providers a:hover,
+.zocial:hover {
+  background: rgba(255, 255, 255, 0.09) !important;
+  border-color: rgba(99, 102, 241, 0.4) !important;
+  transform: translateY(-1px) !important;
+}
+
+/* zocial injects a coloured icon block via ::before — hide it, we use the
+   provider's own icon/text so the buttons stay visually consistent. */
+.zocial::before {
+  display: none !important;
+}
+
+#kc-social-providers .kc-social-provider-logo,
+#kc-social-providers i {
+  font-size: 18px !important;
+}
+
 /* Info Section (Registration & Sign up links) */
-#kc-info, #kc-info-wrapper {
+#kc-info,
+#kc-info-wrapper {
   margin-top: 25px !important;
   padding-top: 20px !important;
   border-top: 1px solid rgba(255, 255, 255, 0.06) !important;
@@ -210,21 +384,26 @@ input.form-control:focus {
   color: #94a3b8 !important;
 }
 
-#kc-info-wrapper a, #kc-registration a {
+#kc-info-wrapper a,
+#kc-registration a,
+#kc-registration-container a {
   color: #10b981 !important; /* Emerald-500 */
   text-decoration: none !important;
   font-weight: 600 !important;
   margin-left: 5px !important;
-  transition: all 0.15s ease !important;
+  transition: color 0.15s ease !important;
 }
 
-#kc-info-wrapper a:hover, #kc-registration a:hover {
+#kc-info-wrapper a:hover,
+#kc-registration a:hover,
+#kc-registration-container a:hover {
   color: #34d399 !important;
   text-decoration: underline !important;
 }
 
 /* Alerts and Messages (Errors / Success messages) */
-.alert {
+.alert,
+.pf-c-alert {
   border-radius: 12px !important;
   padding: 12px 16px !important;
   font-size: 14px !important;
@@ -236,25 +415,29 @@ input.form-control:focus {
   border: 1px solid transparent !important;
 }
 
-.alert-error {
+.alert-error,
+.pf-m-danger {
   background-color: rgba(239, 68, 68, 0.15) !important;
   border-color: rgba(239, 68, 68, 0.3) !important;
   color: #fca5a5 !important;
 }
 
-.alert-success {
+.alert-success,
+.pf-m-success {
   background-color: rgba(16, 185, 129, 0.15) !important;
   border-color: rgba(16, 185, 129, 0.3) !important;
   color: #a7f3d0 !important;
 }
 
-.alert-warning {
+.alert-warning,
+.pf-m-warning {
   background-color: rgba(245, 158, 11, 0.15) !important;
   border-color: rgba(245, 158, 11, 0.3) !important;
   color: #fde047 !important;
 }
 
-.alert-info {
+.alert-info,
+.pf-m-info {
   background-color: rgba(59, 130, 246, 0.15) !important;
   border-color: rgba(59, 130, 246, 0.3) !important;
   color: #bfdbfe !important;
@@ -267,4 +450,89 @@ input.form-control:focus {
 
 .kc-feedback-text {
   display: inline-block !important;
+}
+
+/* Language selector (if enabled) */
+#kc-locale {
+  position: absolute !important;
+  top: 16px !important;
+  right: 16px !important;
+}
+
+#kc-locale ul {
+  background: rgba(15, 23, 42, 0.9) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border-radius: 12px !important;
+}
+
+/* ================================================================== */
+/*  Responsive breakpoints                                             */
+/* ================================================================== */
+
+/* Tablets / medium devices */
+@media (max-width: 768px) {
+  .login-pf-page {
+    padding: 24px 16px !important;
+  }
+
+  #kc-card-wrapper,
+  .card-pf {
+    max-width: 420px !important;
+    padding: 32px 26px !important;
+    border-radius: 24px !important;
+  }
+}
+
+/* Phones */
+@media (max-width: 480px) {
+  .login-pf-page {
+    padding: 16px 12px !important;
+    align-items: flex-start !important;
+  }
+
+  #kc-card-wrapper,
+  .card-pf {
+    max-width: 100% !important;
+    padding: 26px 20px !important;
+    border-radius: 20px !important;
+    margin: 8px auto !important;
+  }
+
+  #kc-page-title {
+    font-size: 22px !important;
+    margin-bottom: 20px !important;
+  }
+
+  input.form-control,
+  input.pf-c-form-control,
+  .pf-c-form-control {
+    font-size: 16px !important; /* prevents iOS zoom-on-focus */
+    padding: 13px 14px !important;
+  }
+
+  /* Stack social buttons on very small screens */
+  #kc-social-providers ul {
+    grid-template-columns: 1fr !important;
+  }
+
+  #kc-form-options,
+  .login-pf-settings {
+    font-size: 13px !important;
+  }
+}
+
+/* Short viewports — allow the card to scroll instead of clipping */
+@media (max-height: 640px) {
+  .login-pf-page {
+    align-items: flex-start !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-pf,
+  .btn-primary,
+  #kc-social-providers a,
+  .pf-c-button {
+    transition: none !important;
+  }
 }
