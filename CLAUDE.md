@@ -62,7 +62,17 @@ src/
   keycloak-admin/         # KeycloakAdminService — admin REST client (GLOBAL module)
   otp/                    # email OTP send/verify
   mail/                   # Nodemailer wrapper (GLOBAL)
+  config/                 # DEPLOYMENT_MODE (standalone|saas) flag helper
+  bootstrap/              # standalone-mode default Organization/Subscription auto-provisioning
+  organizations/          # multi-tenant Organization CRUD + SaaS cross-org provisioning
+  subscriptions/          # Stripe billing (customer/subscription/portal/webhooks), optional
+  licensing/              # Envato purchase-code activation (CodeCanyon anti-piracy)
 ```
+
+`config/` + `bootstrap/` + `organizations/` + `subscriptions/` + `licensing/`
+together implement the standalone/SaaS dual-license model (one codebase, a
+`DEPLOYMENT_MODE` flag, optional Stripe billing, Envato activation) — see
+`../DEPLOYMENT-AND-LICENSING-DEVELOPER.md`.
 
 ### Auth model (important)
 
@@ -75,9 +85,17 @@ src/
 - **Roles come from Mongo, not the JWT.** `RolesGuard` looks up the app user by
   `payload.sub` (`keycloakId`) via `UsersService` and checks its `role` against the
   `@Roles(...)` list. Roles are the `AppRole` enum: `User`, `Admin`,
-  `Administrator`, `Customer`.
+  `Administrator`, `Customer`, and `PlatformAdmin` (cross-org CRM operator —
+  see `../DEPLOYMENT-AND-LICENSING-BUSINESS.md`).
 - Read the caller with `@CurrentUser() user: KeycloakJwtPayload`; the Keycloak
-  subject id is `user.sub`.
+  subject id is `user.sub`. `RolesGuard` also resolves `request.organizationId`
+  from the same Mongo user doc — read it with `@CurrentOrg()`.
+- Two more global guards run around auth: `LicensingGuard` (registered by
+  `LicensingModule`, imported *before* `AuthModule`) blocks every non-`@Public()`
+  route until the CodeCanyon purchase code is activated, but only when
+  `NODE_ENV=production`; `SubscriptionGuard` (registered by `AuthModule`, last
+  in its guard chain) enforces SaaS billing status and is a no-op in standalone
+  mode. See `../DEPLOYMENT-AND-LICENSING-DEVELOPER.md` for the full chain.
 
 ### Data model
 
@@ -87,7 +105,15 @@ src/
   key across all three.
 - `UsersService.getOrProvisionMe` lazily provisions/syncs a `User` from JWT claims
   on first `GET /users/me`. Staff created this way default to `AppRole.User`;
-  customers created via the customers flow get `AppRole.Customer`.
+  customers created via the customers flow get `AppRole.Customer`. In
+  standalone mode only, the very first caller ever (empty `users` collection)
+  is auto-provisioned as `AppRole.Admin` instead — see
+  `../DEPLOYMENT-AND-LICENSING-BUSINESS.md`.
+- **Every tenant-owned record carries `organizationId`** (accounts, activities,
+  automations, contacts, customers, kb, leads, opportunities, reports, teams,
+  tickets, users). Standalone deployments have exactly one organization
+  (auto-created); SaaS deployments have many, each independently billed —
+  see `../DEPLOYMENT-AND-LICENSING-DEVELOPER.md`.
 - **Row-level visibility:** customers carry `assignedToId` (staff keycloakId) and
   `assignedTeamId` (ref `Team`). Admin/Administrator see all records; `User` staff
   only see records they own, records routed to one of their active teams, or
@@ -157,3 +183,9 @@ request because mail failed.
 - No global route prefix is set — controllers own their full paths (e.g.
   `@Controller('auth/otp')`). The frontend's `next.config.ts` rewrites `/api/*` to
   this server, but backend routes are **not** under `/api`.
+- `KeycloakAdminService.sendSetPasswordEmail` passes `client_id`/`redirect_uri`
+  so the user lands back on `/dashboard` after setting their password —
+  without those params Keycloak strands them on its own generic account page.
+- `DEPLOYMENT_MODE` defaults to `standalone` if unset (`getDeploymentMode` in
+  `config/deployment-mode.ts`) — never read it via `process.env` or assume
+  `saas`; always go through that helper.
