@@ -1,0 +1,931 @@
+/* ==========================================================================
+   CRM Pro — Keycloak login theme
+   --------------------------------------------------------------------------
+   This theme inherits from `base`, not `keycloak`, so PatternFly is never
+   loaded and nothing here has to fight it: no `!important`, no overrides of
+   third-party rules. Every class below is emitted by this theme's own
+   FreeMarker templates (or mapped from a kc*Class in theme.properties).
+
+   Layout: a two-column split — branded panel on the left, form panel on the
+   right — that collapses to a single centred column below 1024px.
+
+   Palette: dark by default, deliberately. The CRM Pro marketing site and the
+   app shell are dark (`slate-950` page, `slate-900` surfaces, indigo/violet
+   accents) and Keycloak has no way to read the app's theme toggle, so the auth
+   pages commit to the dark identity instead of following the OS preference and
+   flipping to a white card mid-flow. The light palette is still here, behind an
+   explicit `<html data-force-light>` opt-in (add the attribute in template.ftl).
+   ========================================================================== */
+
+/* ------------------------------------------------------------------ tokens */
+:root {
+  --crm-indigo-50:  #eef2ff;
+  --crm-indigo-100: #e0e7ff;
+  --crm-indigo-200: #c7d2fe;
+  --crm-indigo-400: #818cf8;
+  --crm-indigo-500: #6366f1;
+  --crm-indigo-600: #4f46e5;
+  --crm-indigo-700: #4338ca;
+  --crm-violet-600: #7c3aed;
+
+  /* slate-950 / slate-900 / slate-800 — the same scale the frontend uses */
+  --crm-bg:            #020617;
+  --crm-surface:       #0f172a;
+  --crm-surface-muted: #16203a;
+  --crm-text:          #f8fafc;
+  --crm-text-soft:     #94a3b8;
+  --crm-text-faint:    #64748b;
+  --crm-border:        #1e293b;
+  --crm-border-strong: #2c3b52;
+
+  --crm-danger:     #f87171;
+  --crm-danger-bg:  rgb(220 38 38 / 0.14);
+  --crm-success:    #34d399;
+  --crm-success-bg: rgb(5 150 105 / 0.14);
+  --crm-warning:    #fbbf24;
+  --crm-warning-bg: rgb(180 83 9 / 0.16);
+  --crm-info:       #a5b4fc;
+  --crm-info-bg:    rgb(99 102 241 / 0.16);
+
+  --crm-radius:    14px;
+  --crm-radius-lg: 22px;
+  --crm-ring:      0 0 0 4px rgb(99 102 241 / 0.28);
+  --crm-shadow:    0 1px 2px rgb(0 0 0 / 0.5),
+                   0 24px 48px -20px rgb(0 0 0 / 0.85);
+
+  --crm-font: "Outfit", ui-sans-serif, -apple-system, BlinkMacSystemFont,
+              "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+/* Opt-in light palette — set `data-force-light` on <html> to use it. */
+:root[data-force-light] {
+  --crm-indigo-50:  #eef2ff;
+  --crm-indigo-100: #e0e7ff;
+  --crm-indigo-200: #c7d2fe;
+  --crm-indigo-400: #818cf8;
+  --crm-indigo-500: #6366f1;
+  --crm-indigo-600: #4f46e5;
+  --crm-indigo-700: #4338ca;
+  --crm-violet-600: #7c3aed;
+
+  --crm-bg:            #f6f7fb;
+  --crm-surface:       #ffffff;
+  --crm-surface-muted: #f8fafc;
+  --crm-text:          #0f172a;
+  --crm-text-soft:     #475569;
+  --crm-text-faint:    #94a3b8;
+  --crm-border:        #e2e8f0;
+  --crm-border-strong: #cbd5e1;
+
+  --crm-danger:  #dc2626;
+  --crm-danger-bg: #fef2f2;
+  --crm-success: #059669;
+  --crm-success-bg: #ecfdf5;
+  --crm-warning: #b45309;
+  --crm-warning-bg: #fffbeb;
+  --crm-info:    #4f46e5;
+  --crm-info-bg: #eef2ff;
+
+  --crm-radius:    14px;
+  --crm-radius-lg: 22px;
+  --crm-ring:      0 0 0 4px rgb(99 102 241 / 0.18);
+  --crm-shadow:    0 1px 2px rgb(15 23 42 / 0.04),
+                   0 12px 32px -12px rgb(15 23 42 / 0.16);
+
+  --crm-font: "Outfit", ui-sans-serif, -apple-system, BlinkMacSystemFont,
+              "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+/* ------------------------------------------------------------------- reset */
+*,
+*::before,
+*::after { box-sizing: border-box; }
+
+.crm-html { -webkit-text-size-adjust: 100%; }
+
+.crm-body {
+  margin: 0;
+  min-height: 100vh;
+  min-height: 100dvh;
+  font-family: var(--crm-font);
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--crm-text);
+  background: var(--crm-bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+.crm-body img { max-width: 100%; }
+.crm-body svg { display: block; flex: none; }
+
+/* ------------------------------------------------------------------ layout */
+.crm-shell {
+  display: grid;
+  grid-template-columns: 1fr;
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+@media (min-width: 1024px) {
+  /* Brand column takes the larger share: it holds full-width artwork, while the
+     form column only ever holds a fixed-width card — giving the form the bigger
+     share just turns into empty gutter. */
+  .crm-shell { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); }
+}
+
+/* ------------------------------------------------------------- brand panel */
+.crm-brand {
+  display: none;
+  position: relative;
+  overflow: hidden;
+  padding: 48px 56px 40px;
+  color: #fff;
+  background:
+    radial-gradient(120% 90% at 12% 6%, rgb(255 255 255 / 0.18) 0%, transparent 55%),
+    linear-gradient(155deg, var(--crm-indigo-600) 0%, var(--crm-violet-600) 55%, #3b1d9e 100%);
+}
+
+@media (min-width: 1024px) {
+  /* Pinned to one viewport height rather than stretched to the grid row. A tall
+     form (registration is ~1.5 screens) would otherwise pull the brand column
+     to the same height and space-between would tear the logo, headline and
+     footnote apart, leaving a large void in the middle. */
+  .crm-brand {
+    display: block;
+    position: sticky;
+    top: 0;
+    align-self: start;
+    height: 100vh;
+    height: 100dvh;
+  }
+}
+
+/* Faint dot grid, drawn with a gradient so the theme ships no image assets. */
+.crm-brand::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(rgb(255 255 255 / 0.14) 1px, transparent 1px);
+  background-size: 22px 22px;
+  mask-image: linear-gradient(160deg, #000 10%, transparent 75%);
+  -webkit-mask-image: linear-gradient(160deg, #000 10%, transparent 75%);
+}
+
+.crm-brand__glow {
+  position: absolute;
+  right: -18%;
+  bottom: -22%;
+  width: 62%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgb(255 255 255 / 0.22) 0%, transparent 68%);
+  pointer-events: none;
+}
+
+.crm-brand__inner {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 40px;
+  height: 100%;
+  max-width: 480px;
+}
+
+/* The copy block owns the slack, so it sits optically centred between the
+   logo and the footnote instead of being pushed to one end. */
+.crm-brand__copy { margin: auto 0; }
+
+.crm-brand__logo { display: flex; align-items: center; gap: 12px; }
+
+.crm-brand__mark {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  color: #fff;
+  background: linear-gradient(135deg, var(--crm-indigo-500), var(--crm-indigo-700));
+  box-shadow: 0 8px 20px -8px rgb(79 70 229 / 0.9);
+}
+
+.crm-brand__mark--sm { width: 32px; height: 32px; border-radius: 10px; }
+
+.crm-brand__name {
+  font-size: 1.22rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.crm-brand__name--sm { font-size: 1.05rem; color: var(--crm-text); }
+
+.crm-brand__headline {
+  margin: 0 0 14px;
+  font-size: clamp(2rem, 2.6vw, 2.7rem);
+  font-weight: 800;
+  line-height: 1.12;
+  letter-spacing: -0.03em;
+}
+
+.crm-brand__lede {
+  margin: 0 0 28px;
+  max-width: 40ch;
+  font-size: 1rem;
+  color: rgb(255 255 255 / 0.82);
+}
+
+.crm-brand__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 12px;
+  font-size: 0.94rem;
+  color: rgb(255 255 255 / 0.9);
+}
+
+.crm-brand__list li { display: flex; align-items: flex-start; gap: 10px; }
+
+.crm-brand__tick {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin-top: 2px;
+  border-radius: 50%;
+  font-size: 0.7rem;
+  background: rgb(255 255 255 / 0.18);
+}
+
+.crm-brand__foot {
+  margin: 0;
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgb(255 255 255 / 0.58);
+}
+
+/* -------------------------------------------------------------- form panel */
+.crm-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  padding: 40px 20px 32px;
+}
+
+@media (min-width: 640px)  { .crm-panel { padding: 48px 40px; } }
+@media (min-width: 1024px) { .crm-panel { padding: 48px 32px; } }
+
+.crm-card {
+  width: 100%;
+  max-width: 460px;
+  padding: 32px 26px;
+  border: 1px solid var(--crm-border);
+  border-radius: var(--crm-radius-lg);
+  background: var(--crm-surface);
+  box-shadow: var(--crm-shadow);
+}
+
+@media (min-width: 480px) { .crm-card { padding: 38px 36px; } }
+
+.crm-card__brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 24px;
+}
+
+@media (min-width: 1024px) { .crm-card__brand { display: none; } }
+
+.crm-card__header { margin-bottom: 24px; }
+
+#kc-page-title {
+  margin: 0;
+  font-size: 1.55rem;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  line-height: 1.25;
+  color: var(--crm-text);
+}
+
+.crm-card__subtitle {
+  margin: 7px 0 0;
+  font-size: 0.92rem;
+  color: var(--crm-text-soft);
+}
+
+.crm-card__subtitle:empty { display: none; }
+
+.crm-required-note {
+  margin: 12px 0 0;
+  font-size: 0.8rem;
+  color: var(--crm-text-faint);
+}
+
+.crm-required { margin-left: 3px; color: var(--crm-danger); }
+
+.crm-legal {
+  margin: 0;
+  font-size: 0.78rem;
+  text-align: center;
+  color: var(--crm-text-faint);
+}
+
+/* --------------------------------------------------- signed-in-as identity */
+.crm-identity {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--crm-border);
+  border-radius: var(--crm-radius);
+  background: var(--crm-surface-muted);
+}
+
+.crm-identity__avatar {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(135deg, var(--crm-indigo-500), var(--crm-violet-600));
+}
+
+.crm-identity__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.crm-identity__switch {
+  flex: none;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--crm-indigo-400);
+  text-decoration: none;
+}
+
+.crm-identity__switch:hover { text-decoration: underline; }
+
+:root[data-force-light] .crm-identity__switch { color: var(--crm-indigo-600); }
+
+/* ------------------------------------------------------------------- forms */
+.crm-content { display: block; }
+
+.crm-form { display: grid; gap: 18px; }
+
+.crm-field { display: grid; gap: 7px; }
+
+.crm-fieldset { margin-top: 8px; }
+.crm-fieldset__title { margin: 0; font-size: 0.95rem; font-weight: 700; }
+.crm-fieldset__desc { margin: 4px 0 0; font-size: 0.85rem; color: var(--crm-text-soft); }
+
+.crm-label,
+.crm-label-wrap > label {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--crm-text);
+}
+
+.crm-label-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.crm-field__help { font-size: 0.8rem; color: var(--crm-text-soft); }
+
+.crm-field__error {
+  display: block;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--crm-danger);
+}
+
+/* ------------------------------------------------------------------ inputs */
+.crm-input {
+  width: 100%;
+  min-height: 46px;
+  padding: 11px 14px;
+  border: 1px solid var(--crm-border-strong);
+  border-radius: var(--crm-radius);
+  font: inherit;
+  font-size: 0.95rem;
+  color: var(--crm-text);
+  background: var(--crm-surface);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+  appearance: none;
+}
+
+.crm-input::placeholder { color: var(--crm-text-faint); }
+
+.crm-input:hover:not(:disabled) { border-color: var(--crm-indigo-400); }
+
+.crm-input:focus {
+  outline: none;
+  border-color: var(--crm-indigo-500);
+  box-shadow: var(--crm-ring);
+}
+
+.crm-input:disabled {
+  cursor: not-allowed;
+  color: var(--crm-text-faint);
+  background: var(--crm-surface-muted);
+}
+
+.crm-input[aria-invalid="true"],
+.crm-field--error .crm-input {
+  border-color: var(--crm-danger);
+}
+
+.crm-input[aria-invalid="true"]:focus,
+.crm-field--error .crm-input:focus {
+  box-shadow: 0 0 0 4px rgb(220 38 38 / 0.16);
+}
+
+/* Chrome paints autofilled inputs with its own near-white background, which
+   reads as a broken field on a dark card. There is no property to override it —
+   the long inset shadow is the standard workaround. */
+.crm-input:-webkit-autofill,
+.crm-input:-webkit-autofill:hover,
+.crm-input:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--crm-text);
+  -webkit-box-shadow: 0 0 0 1000px var(--crm-surface-muted) inset;
+  caret-color: var(--crm-text);
+  transition: background-color 100000s ease-in-out 0s;
+}
+
+.crm-input--textarea { min-height: 96px; resize: vertical; }
+
+.crm-input--select {
+  padding-right: 38px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 16px;
+}
+
+.crm-input--code {
+  text-align: center;
+  font-size: 1.4rem;
+  font-weight: 700;
+  letter-spacing: 0.4em;
+  text-indent: 0.4em;
+}
+
+/* icon + trailing-action affordances */
+.crm-input-group { position: relative; display: block; }
+
+.crm-input-group__icon {
+  position: absolute;
+  top: 50%;
+  left: 13px;
+  transform: translateY(-50%);
+  color: var(--crm-text-faint);
+  pointer-events: none;
+}
+
+.crm-input--with-icon   { padding-left: 41px; }
+.crm-input--with-action { padding-right: 46px; }
+
+.crm-reveal {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 0;
+  border-radius: 9px;
+  cursor: pointer;
+  color: var(--crm-text-faint);
+  background: transparent;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.crm-reveal:hover { color: var(--crm-text); background: var(--crm-surface-muted); }
+.crm-reveal:focus-visible { outline: 2px solid var(--crm-indigo-500); outline-offset: 1px; }
+
+/* Exactly one of the two eye glyphs is visible at a time. This has to be a
+   class toggle, not the `hidden` attribute: `hidden` is an HTML attribute and
+   has no effect on SVG elements, and `.crm-body svg { display: block }` above
+   would out-specify the UA's `[hidden] { display: none }` regardless. */
+.crm-reveal__show,
+.crm-reveal__hide { grid-area: 1 / 1; }
+.crm-reveal .crm-reveal__hide { display: none; }
+.crm-reveal.is-revealed .crm-reveal__show { display: none; }
+.crm-reveal.is-revealed .crm-reveal__hide { display: block; }
+
+/* ------------------------------------------------------- password strength */
+/* `display: flex` below would otherwise defeat the UA's `[hidden]` rule and
+   leave an empty red meter sitting under an untouched password box. */
+.crm-strength[hidden] { display: none; }
+
+.crm-strength {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.crm-strength__track {
+  flex: 1;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--crm-border);
+  overflow: hidden;
+}
+
+.crm-strength__bar {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--crm-danger);
+  transition: width 0.2s ease, background-color 0.2s ease;
+}
+
+.crm-strength.is-weak   .crm-strength__bar { background: #ef4444; }
+.crm-strength.is-fair   .crm-strength__bar { background: #f59e0b; }
+.crm-strength.is-good   .crm-strength__bar { background: #3b82f6; }
+.crm-strength.is-strong .crm-strength__bar { background: var(--crm-success); }
+
+.crm-strength.is-weak   .crm-strength__label { color: #ef4444; }
+.crm-strength.is-fair   .crm-strength__label { color: #d97706; }
+.crm-strength.is-good   .crm-strength__label { color: #3b82f6; }
+.crm-strength.is-strong .crm-strength__label { color: var(--crm-success); }
+
+/* -------------------------------------------------------- checks & radios */
+.crm-check {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.crm-check__input {
+  flex: none;
+  width: 17px;
+  height: 17px;
+  margin: 0;
+  accent-color: var(--crm-indigo-600);
+  cursor: pointer;
+}
+
+.crm-check__label {
+  font-size: 0.88rem;
+  color: var(--crm-text-soft);
+  cursor: pointer;
+}
+
+.crm-check__label--disabled { cursor: not-allowed; opacity: 0.6; }
+
+/* ----------------------------------------------------------------- buttons */
+.crm-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 11px 18px;
+  border: 1px solid transparent;
+  border-radius: var(--crm-radius);
+  font: inherit;
+  font-size: 0.95rem;
+  font-weight: 600;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.15s ease,
+              background-color 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+}
+
+.crm-btn:focus-visible { outline: 2px solid var(--crm-indigo-500); outline-offset: 2px; }
+.crm-btn:active:not(.is-busy) { transform: scale(0.985); }
+
+.crm-btn--lg { min-height: 48px; font-size: 1rem; }
+.crm-btn--block { width: 100%; }
+
+.crm-btn--primary {
+  color: #fff;
+  background: linear-gradient(135deg, var(--crm-indigo-600), var(--crm-violet-600));
+  box-shadow: 0 10px 22px -12px rgb(79 70 229 / 0.9);
+}
+
+.crm-btn--primary:hover { box-shadow: 0 14px 28px -12px rgb(79 70 229 / 1); }
+
+.crm-btn--ghost {
+  color: var(--crm-text);
+  border-color: var(--crm-border-strong);
+  background: var(--crm-surface);
+}
+
+.crm-btn--ghost:hover { background: var(--crm-surface-muted); }
+
+.crm-btn.is-busy { opacity: 0.65; cursor: progress; }
+
+.crm-form-actions { display: grid; gap: 10px; }
+
+.crm-form-options { display: flex; justify-content: flex-end; }
+.crm-form-options__aside { font-size: 0.86rem; }
+.crm-form-settings { margin-top: -4px; }
+
+/* -------------------------------------------------------------------- links */
+.crm-link {
+  color: var(--crm-indigo-400);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.crm-link:hover { text-decoration: underline; }
+.crm-link--sm { font-size: 0.82rem; }
+
+.crm-link--back { display: inline-flex; align-items: center; gap: 5px; }
+
+.crm-link--button {
+  padding: 0;
+  border: 0;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  background: none;
+}
+
+:root[data-force-light] .crm-link { color: var(--crm-indigo-600); }
+
+.crm-try-another { margin-top: 16px; text-align: center; }
+
+/* ------------------------------------------------------------------ alerts */
+.crm-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 20px;
+  padding: 12px 14px;
+  border: 1px solid transparent;
+  border-radius: var(--crm-radius);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.crm-alert__icon { flex: none; margin-top: 1px; }
+.crm-alert__text { min-width: 0; }
+
+.crm-alert--error   { color: var(--crm-danger);  border-color: currentColor; background: var(--crm-danger-bg); }
+.crm-alert--success { color: var(--crm-success); border-color: currentColor; background: var(--crm-success-bg); }
+.crm-alert--warning { color: var(--crm-warning); border-color: currentColor; background: var(--crm-warning-bg); }
+.crm-alert--info    { color: var(--crm-info);    border-color: currentColor; background: var(--crm-info-bg); }
+
+/* Only the icon should be tinted; keep the message itself readable. */
+.crm-alert .crm-alert__text { color: var(--crm-text); }
+
+/* ------------------------------------------------- status pages (info/error) */
+.crm-status { display: grid; justify-items: center; gap: 14px; text-align: center; }
+
+.crm-status__icon {
+  display: grid;
+  place-items: center;
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+}
+
+.crm-status__icon--success { color: var(--crm-success); background: var(--crm-success-bg); }
+.crm-status__icon--error   { color: var(--crm-danger);  background: var(--crm-danger-bg); }
+.crm-status__icon--warning { color: var(--crm-warning); background: var(--crm-warning-bg); }
+.crm-status__icon--info    { color: var(--crm-info);    background: var(--crm-info-bg); }
+
+.crm-status__text { margin: 0; font-size: 0.95rem; color: var(--crm-text-soft); }
+.crm-status .crm-btn,
+.crm-status .crm-form-actions { width: 100%; margin-top: 4px; }
+
+/* --------------------------------------------------------- social providers */
+.crm-social { margin-top: 22px; }
+
+.crm-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--crm-text-faint);
+}
+
+.crm-divider::before,
+.crm-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--crm-border);
+}
+
+.crm-social__list { display: grid; gap: 10px; }
+.crm-social__list--grid { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+
+.crm-social__btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 46px;
+  padding: 11px 16px;
+  border: 1px solid var(--crm-border-strong);
+  border-radius: var(--crm-radius);
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--crm-text);
+  text-decoration: none;
+  background: var(--crm-surface);
+  transition: border-color 0.15s ease, background-color 0.15s ease, transform 0.12s ease;
+}
+
+.crm-social__btn:hover {
+  border-color: var(--crm-indigo-400);
+  background: var(--crm-surface-muted);
+}
+
+.crm-social__btn:active { transform: scale(0.985); }
+
+.crm-social__icon { display: grid; place-items: center; flex: none; }
+.crm-social__name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ------------------------------------------------------------ footnote area */
+.crm-footnote {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--crm-border);
+  font-size: 0.9rem;
+  text-align: center;
+  color: var(--crm-text-soft);
+}
+
+/* ------------------------------------------------------------- OTP options */
+.crm-otp-options { display: grid; gap: 8px; }
+
+.crm-otp-option__input { position: absolute; opacity: 0; pointer-events: none; }
+
+.crm-otp-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 13px;
+  border: 1px solid var(--crm-border-strong);
+  border-radius: var(--crm-radius);
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.crm-otp-option:hover { background: var(--crm-surface-muted); }
+
+.crm-otp-option__input:checked + .crm-otp-option {
+  border-color: var(--crm-indigo-500);
+  background: var(--crm-info-bg);
+}
+
+.crm-otp-option__icon { color: var(--crm-text-faint); }
+.crm-otp-option__title { font-weight: 600; }
+
+/* ------------------------------ authenticator picker (base select-authenticator) */
+.crm-choice-list { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+
+.crm-choice {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 14px;
+  border: 1px solid var(--crm-border-strong);
+  border-radius: var(--crm-radius);
+  text-align: left;
+  text-decoration: none;
+  color: inherit;
+  background: var(--crm-surface);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.crm-choice:hover { border-color: var(--crm-indigo-400); background: var(--crm-surface-muted); }
+
+.crm-choice__fill  { flex: 1; }
+.crm-choice__body  { flex: 1; min-width: 0; }
+.crm-choice__title { font-weight: 600; }
+.crm-choice__desc  { font-size: 0.85rem; color: var(--crm-text-soft); }
+.crm-choice__icon,
+.crm-choice__arrow { color: var(--crm-text-faint); }
+
+/* ------------------------------------------------------------ locale picker */
+.crm-locale {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  z-index: 20;
+}
+
+.crm-locale__dropdown { position: relative; }
+
+.crm-locale__dropdown > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border: 1px solid var(--crm-border);
+  border-radius: 999px;
+  font: inherit;
+  font-size: 0.83rem;
+  font-weight: 600;
+  color: var(--crm-text-soft);
+  background: var(--crm-surface);
+  cursor: pointer;
+}
+
+.crm-locale__dropdown > button:hover { color: var(--crm-text); }
+
+.crm-locale__list {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  display: none;
+  min-width: 160px;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  border: 1px solid var(--crm-border);
+  border-radius: var(--crm-radius);
+  background: var(--crm-surface);
+  box-shadow: var(--crm-shadow);
+}
+
+.crm-locale__dropdown.is-open .crm-locale__list { display: block; }
+
+.crm-locale__link {
+  display: block;
+  padding: 8px 10px;
+  border-radius: 9px;
+  font-size: 0.88rem;
+  color: var(--crm-text);
+  text-decoration: none;
+}
+
+.crm-locale__link:hover { background: var(--crm-surface-muted); }
+
+/* ---------------------------------------------------- base-template fallbacks
+   Pages this theme does not override (webauthn, recovery codes, x509, terms…)
+   render base's markup inside our shell. These few rules keep their loose
+   elements — bare <p class="instruction">, wrapper divs, <hr> — presentable. */
+.crm-content p.instruction,
+#kc-terms-text,
+#kc-registration-terms-text {
+  margin: 0 0 16px;
+  font-size: 0.93rem;
+  color: var(--crm-text-soft);
+}
+
+#kc-terms-text { max-height: 260px; overflow-y: auto; }
+
+.crm-content hr {
+  margin: 22px 0;
+  border: 0;
+  border-top: 1px solid var(--crm-border);
+}
+
+.crm-content h2 { font-size: 1rem; font-weight: 700; }
+
+.crm-content .crm-label-wrap + .crm-input-wrap { margin-top: 6px; }
+.crm-content .crm-input-wrap { display: grid; gap: 6px; }
+
+/* Base sprinkles `.form-group` / `.checkbox` on a few leftover pages. */
+.crm-content .form-group { margin-bottom: 16px; }
+.crm-content .checkbox { display: flex; align-items: center; gap: 8px; font-size: 0.88rem; }
+.crm-content .checkbox label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+
+/* --------------------------------------------------------------- a11y prefs */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

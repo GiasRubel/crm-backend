@@ -189,6 +189,11 @@ request because mail failed.
 - `KeycloakAdminService.sendSetPasswordEmail` passes `client_id`/`redirect_uri`
   so the user lands back on `/dashboard` after setting their password —
   without those params Keycloak strands them on its own generic account page.
+- **The login/register/password UI is a Keycloak theme, not a Next.js page** —
+  `keycloak/themes/crm-theme/login/` (bind-mounted by `docker-compose.yml`). It
+  inherits from `base`, so it owns its own FreeMarker markup and CSS; do not
+  reintroduce `parent=keycloak` (that drags in PatternFly and every rule then
+  needs `!important`). See `KEYCLOAK-SETUP.md` Part 5.
 - `DEPLOYMENT_MODE` defaults to `standalone` if unset (`getDeploymentMode` in
   `config/deployment-mode.ts`) — never read it via `process.env` or assume
   `saas`; always go through that helper.

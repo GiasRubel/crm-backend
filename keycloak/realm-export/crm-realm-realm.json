@@ -1,5 +1,6 @@
 {
   "realm": "crm-realm",
+  "displayName": "CRM Pro",
   "enabled": true,
   "registrationAllowed": true,
   "loginWithEmailAllowed": true,

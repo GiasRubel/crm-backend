@@ -232,3 +232,80 @@ End-to-end, for a user hitting a protected page while logged out:
   It is required: without `id_token_hint`, Keycloak cannot identify the session
   being ended and interrupts logout with a "Do you want to log out?"
   confirmation page.
+
+---
+
+## Part 5 — The `crm-theme` Login Theme
+
+Everything the user sees while signing in — login, registration, forgot/reset
+password, set-a-new-password, OTP, email verification, error and expiry pages —
+is rendered by Keycloak, not by Next.js. That UI lives in
+`crm-backend/keycloak/themes/crm-theme/login/`, bind-mounted into the container
+by `docker-compose.yml` (`./keycloak/themes:/opt/keycloak/themes`) and selected
+by `"loginTheme": "crm-theme"` in the realm.
+
+### It inherits from `base`, not `keycloak`
+
+This is the single most important thing to know before editing it.
+
+`parent=keycloak` would pull in PatternFly's markup and stylesheet, and every
+visual change would then have to be an `!important` override of somebody else's
+CSS. `parent=base` instead gives Keycloak's *logic* (which fields exist, which
+errors are shown, which actions are available) with **no styling at all**, so
+this theme owns the markup outright:
+
+```
+login/
+  theme.properties          # parent=base + every kc*Class remapped to a crm-* class
+  template.ftl              # the shell every page renders into (split brand/form layout)
+  login.ftl                 # sign in
+  register.ftl              # create account
+  login-reset-password.ftl  # forgot password
+  login-update-password.ftl # set a new password
+  login-otp.ftl             # two-step verification code
+  login-verify-email.ftl    # "check your inbox"
+  info.ftl / error.ftl / login-page-expired.ftl
+  user-profile-commons.ftl  # declarative profile fields (register / update profile)
+  field-macros.ftl          # shared password field: icon, reveal button, strength meter
+  social-icons.ftl          # inline Google/Facebook/… brand marks
+  messages/messages_en.properties   # copy overrides only; the rest falls through to base
+  resources/css/crm-theme.css       # the whole design system, no !important anywhere
+  resources/js/crm-theme.js         # progressive enhancement only (reveal, meter, locale menu)
+```
+
+Pages **not** listed above (WebAuthn, recovery codes, X.509, terms, consent, …)
+still work: they fall back to base's templates, render inside this theme's
+`template.ftl`, and pick up the design because every `kc*Class` property in
+`theme.properties` is remapped to a `crm-*` class. That mapping is the contract
+— if you rename a CSS class, update `theme.properties` too or those fallback
+pages lose their styling silently.
+
+### Conventions
+
+* **No icon font.** Every icon is an inline SVG. Keycloak hands templates a
+  Font-Awesome `iconClasses` string for identity providers; `social-icons.ftl`
+  ignores it and matches on the provider alias instead, with a neutral globe
+  fallback so a newly added IdP never renders a broken button.
+* **JS is optional.** `crm-theme.js` only adds the password reveal, the strength
+  hint, the locale menu and double-submit protection. Every page submits and
+  validates correctly with JavaScript disabled.
+* **Light and dark** both ship, driven by `prefers-color-scheme` on CSS custom
+  properties declared once at the top of `crm-theme.css`.
+* **The brand panel** (left column, ≥1024px) reads its product name from the
+  realm's **Display name** — set to `CRM Pro`. If that is blank Keycloak falls
+  back to the realm *id* (`crm-realm`) and the login page will say so; the realm
+  export sets `"displayName": "CRM Pro"` for fresh imports.
+
+### Working on it
+
+`start-dev` disables Keycloak's theme and template caches, and the directory is
+bind-mounted, so **editing a `.ftl` or `.css` and reloading the page is enough**.
+Restart the container (`docker restart crm-keycloak`) only after changing
+`theme.properties`, since the parent/inheritance chain is resolved at load.
+
+A FreeMarker mistake surfaces as a Keycloak-rendered 500, not a broken layout —
+check `docker logs crm-keycloak` for the template name and line number.
+
+> **Note:** `CRM/keycloak/themes/` (repository root) is a stale duplicate of this
+> directory from before the theme moved under `crm-backend/`. Nothing mounts it.
+> Edit only `crm-backend/keycloak/themes/`.
