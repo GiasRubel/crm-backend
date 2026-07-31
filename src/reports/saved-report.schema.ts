@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Schema as MongooseSchema } from 'mongoose';
+import { HydratedDocument, Schema as MongooseSchema, Types } from 'mongoose';
 import type {
   ReportGranularity,
   ReportMetricFn,
@@ -61,6 +61,9 @@ export const SavedReportDateRangeSchema =
  */
 @Schema({ timestamps: true })
 export class SavedReport {
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Organization', required: true, index: true })
+  organizationId: Types.ObjectId;
+
   @Prop({ required: true, trim: true })
   name: string;
 

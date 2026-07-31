@@ -45,6 +45,7 @@ export class CustomersService {
   async create(
     dto: CreateCustomerDto,
     createdBy: string,
+    organizationId: Types.ObjectId,
   ): Promise<CustomerResponseDto> {
     const email = dto.email.trim().toLowerCase();
 
@@ -90,6 +91,7 @@ export class CustomersService {
         email,
         dto.firstName,
         dto.lastName,
+        organizationId,
       );
       createdUserDoc = true;
 
@@ -97,6 +99,7 @@ export class CustomersService {
 
       // Create detailed customer profile document
       createdCustomerDoc = await this.customerModel.create({
+        organizationId,
         keycloakId,
         email,
         firstName: dto.firstName.trim(),
@@ -184,12 +187,16 @@ export class CustomersService {
     }
   }
 
-  async findAll(query: CustomerQueryDto, requesterKeycloakId: string) {
+  async findAll(
+    query: CustomerQueryDto,
+    requesterKeycloakId: string,
+    organizationId: Types.ObjectId,
+  ) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 10;
     const skip = (page - 1) * limit;
 
-    const conditions: Record<string, unknown>[] = [];
+    const conditions: Record<string, unknown>[] = [{ organizationId }];
 
     if (query.search?.trim()) {
       const searchRegex = new RegExp(escapeRegExp(query.search.trim()), 'i');
@@ -209,7 +216,10 @@ export class CustomersService {
     }
 
     // Row-level security: non-admin staff only see records in their scope
-    const visibility = await this.buildVisibilityFilter(requesterKeycloakId);
+    const visibility = await this.buildVisibilityFilter(
+      requesterKeycloakId,
+      organizationId,
+    );
     if (visibility) {
       conditions.push(visibility);
     }
@@ -245,14 +255,22 @@ export class CustomersService {
     };
   }
 
-  async getStats(requesterKeycloakId: string): Promise<CustomerStatsDto> {
+  async getStats(
+    requesterKeycloakId: string,
+    organizationId: Types.ObjectId,
+  ): Promise<CustomerStatsDto> {
     const startOfMonth = new Date();
     startOfMonth.setDate(1);
     startOfMonth.setHours(0, 0, 0, 0);
 
     // Stats reflect the caller's visible scope, same as the list
-    const visibility =
-      (await this.buildVisibilityFilter(requesterKeycloakId)) ?? {};
+    const visibility = {
+      organizationId,
+      ...((await this.buildVisibilityFilter(
+        requesterKeycloakId,
+        organizationId,
+      )) ?? {}),
+    };
 
     const [byStatus, total, newThisMonth] = await Promise.all([
       this.customerModel
@@ -284,9 +302,10 @@ export class CustomersService {
   async findOne(
     id: string,
     requesterKeycloakId: string,
+    organizationId: Types.ObjectId,
   ): Promise<CustomerResponseDto> {
-    const customer = await this.getByIdOrFail(id);
-    await this.assertCanView(customer, requesterKeycloakId);
+    const customer = await this.getByIdOrFail(id, organizationId);
+    await this.assertCanView(customer, requesterKeycloakId, organizationId);
     return this.mapOne(customer);
   }
 
@@ -304,8 +323,9 @@ export class CustomersService {
   async update(
     id: string,
     dto: UpdateCustomerDto,
+    organizationId: Types.ObjectId,
   ): Promise<CustomerResponseDto> {
-    const customer = await this.getByIdOrFail(id);
+    const customer = await this.getByIdOrFail(id, organizationId);
 
     const updates: Partial<Customer> = {};
     const userUpdates: Record<string, string> = {};
@@ -411,8 +431,9 @@ export class CustomersService {
   async assign(
     id: string,
     dto: AssignCustomerDto,
+    organizationId: Types.ObjectId,
   ): Promise<CustomerResponseDto> {
-    const customer = await this.getByIdOrFail(id);
+    const customer = await this.getByIdOrFail(id, organizationId);
 
     const sets: Record<string, unknown> = {};
     const unsets: Record<string, ''> = {};
@@ -481,8 +502,8 @@ export class CustomersService {
     return this.mapOne(updated);
   }
 
-  async remove(id: string): Promise<void> {
-    const customer = await this.getByIdOrFail(id);
+  async remove(id: string, organizationId: Types.ObjectId): Promise<void> {
+    const customer = await this.getByIdOrFail(id, organizationId);
 
     // 1. Delete in Keycloak
     try {
@@ -503,8 +524,11 @@ export class CustomersService {
     this.logger.log(`Customer deleted: ${id}`);
   }
 
-  async resendInvitation(id: string): Promise<void> {
-    const customer = await this.getByIdOrFail(id);
+  async resendInvitation(
+    id: string,
+    organizationId: Types.ObjectId,
+  ): Promise<void> {
+    const customer = await this.getByIdOrFail(id, organizationId);
     await this.keycloakAdminService.sendSetPasswordEmail(customer.keycloakId);
     this.logger.log(
       `Resent password setup email to customer ${customer.email}`,
@@ -552,6 +576,7 @@ export class CustomersService {
    */
   private async buildVisibilityFilter(
     keycloakId: string,
+    organizationId: Types.ObjectId,
   ): Promise<Record<string, unknown> | null> {
     const appUser = await this.usersService.findByKeycloakId(keycloakId);
     if (!appUser) {
@@ -565,7 +590,10 @@ export class CustomersService {
       return null;
     }
 
-    const teamIds = await this.teamsService.getTeamIdsForMember(keycloakId);
+    const teamIds = await this.teamsService.getTeamIdsForMember(
+      keycloakId,
+      organizationId,
+    );
     return {
       $or: [
         { assignedToId: keycloakId },
@@ -579,6 +607,7 @@ export class CustomersService {
   private async assertCanView(
     customer: CustomerDocument,
     keycloakId: string,
+    organizationId: Types.ObjectId,
   ): Promise<void> {
     const appUser = await this.usersService.findByKeycloakId(keycloakId);
     if (!appUser) {
@@ -597,7 +626,10 @@ export class CustomersService {
       return;
     }
     if (customer.assignedTeamId) {
-      const teamIds = await this.teamsService.getTeamIdsForMember(keycloakId);
+      const teamIds = await this.teamsService.getTeamIdsForMember(
+        keycloakId,
+        organizationId,
+      );
       if (teamIds.some((teamId) => teamId.equals(customer.assignedTeamId))) {
         return;
       }
@@ -706,11 +738,16 @@ export class CustomersService {
   }
 
   /** Load a customer by id, rejecting malformed ids with a 404 instead of a Mongoose CastError (500). */
-  private async getByIdOrFail(id: string): Promise<CustomerDocument> {
+  private async getByIdOrFail(
+    id: string,
+    organizationId: Types.ObjectId,
+  ): Promise<CustomerDocument> {
     if (!isValidObjectId(id)) {
       throw new NotFoundException(`Customer with ID ${id} not found`);
     }
-    const customer = await this.customerModel.findById(id).exec();
+    const customer = await this.customerModel
+      .findOne({ _id: id, organizationId })
+      .exec();
     if (!customer) {
       throw new NotFoundException(`Customer with ID ${id} not found`);
     }

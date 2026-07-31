@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { CustomersModule } from '../customers/customers.module';
 import { OpportunitiesModule } from '../opportunities/opportunities.module';
+import { OrganizationsModule } from '../organizations/organizations.module';
 import { TeamsModule } from '../teams/teams.module';
 import { UsersModule } from '../users/users.module';
 import { Lead, LeadSchema } from './lead.schema';
@@ -15,6 +16,7 @@ import { LeadsService } from './leads.service';
     TeamsModule,
     CustomersModule,
     OpportunitiesModule,
+    OrganizationsModule,
   ],
   controllers: [LeadsController],
   providers: [LeadsService],

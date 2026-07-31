@@ -142,8 +142,26 @@ export class AutomationsService implements OnModuleInit, OnModuleDestroy {
   // ── Trigger rules ───────────────────────────────────────────────────────
 
   private async handleEvent(payload: CrmEventPayload): Promise<void> {
+    // Events carry no explicit organizationId param, but every domain
+    // record does (doc.toObject() includes it) — rules must only fire for
+    // the org that owns the triggering record, never cross-tenant.
+    const organizationId = payload.record.organizationId as
+      | Types.ObjectId
+      | undefined;
+    if (!organizationId) {
+      this.logger.warn(
+        `Event ${payload.event} for ${payload.recordType} ${payload.recordId} has no organizationId — skipping automation`,
+      );
+      return;
+    }
+
     const rules = await this.ruleModel
-      .find({ kind: 'trigger', isActive: true, triggerEvent: payload.event })
+      .find({
+        organizationId,
+        kind: 'trigger',
+        isActive: true,
+        triggerEvent: payload.event,
+      })
       .exec();
     if (rules.length === 0) return;
 
@@ -191,9 +209,12 @@ export class AutomationsService implements OnModuleInit, OnModuleDestroy {
         const idleBefore = new Date(
           Date.now() - rule.slaIdleHours * 60 * 60 * 1000,
         );
+        // Candidates are scoped to the rule's own organization — an SLA
+        // rule must never escalate another organization's records.
         const candidates = await this.findIdleRecords(
           rule.slaEntity,
           idleBefore,
+          rule.organizationId,
         );
 
         for (const candidate of candidates) {
@@ -242,10 +263,15 @@ export class AutomationsService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async findIdleRecords(entity: SlaEntity, idleBefore: Date) {
+  private async findIdleRecords(
+    entity: SlaEntity,
+    idleBefore: Date,
+    organizationId: Types.ObjectId,
+  ) {
     if (entity === 'lead') {
       return this.leadModel
         .find({
+          organizationId,
           status: { $in: OPEN_LEAD_STATUSES },
           updatedAt: { $lt: idleBefore },
         })
@@ -256,6 +282,7 @@ export class AutomationsService implements OnModuleInit, OnModuleDestroy {
       // Only tickets where the ball is in the team's court can breach
       return this.ticketModel
         .find({
+          organizationId,
           status: { $in: ACTIVE_TICKET_STATUSES },
           updatedAt: { $lt: idleBefore },
         })
@@ -264,6 +291,7 @@ export class AutomationsService implements OnModuleInit, OnModuleDestroy {
     }
     return this.opportunityModel
       .find({
+        organizationId,
         stage: { $in: OPPORTUNITY_STAGES_OPEN },
         updatedAt: { $lt: idleBefore },
       })
@@ -366,6 +394,7 @@ export class AutomationsService implements OnModuleInit, OnModuleDestroy {
           : 'partial';
 
     await this.runModel.create({
+      organizationId: rule.organizationId,
       ruleId: rule._id,
       ruleName: rule.name,
       event: run.event,
@@ -429,6 +458,7 @@ export class AutomationsService implements OnModuleInit, OnModuleDestroy {
             assignedToId: assignee,
           },
           SYSTEM_ACTOR,
+          rule.organizationId,
         );
         return `task "${created.subject}" → ${assignee}`;
       }
@@ -455,16 +485,32 @@ export class AutomationsService implements OnModuleInit, OnModuleDestroy {
 
         switch (run.recordType) {
           case 'lead':
-            await this.leadsService.assign(run.recordId, dto);
+            await this.leadsService.assign(
+              run.recordId,
+              dto,
+              rule.organizationId,
+            );
             break;
           case 'opportunity':
-            await this.opportunitiesService.assign(run.recordId, dto);
+            await this.opportunitiesService.assign(
+              run.recordId,
+              dto,
+              rule.organizationId,
+            );
             break;
           case 'customer':
-            await this.customersService.assign(run.recordId, dto);
+            await this.customersService.assign(
+              run.recordId,
+              dto,
+              rule.organizationId,
+            );
             break;
           case 'contact':
-            await this.contactsService.assign(run.recordId, dto);
+            await this.contactsService.assign(
+              run.recordId,
+              dto,
+              rule.organizationId,
+            );
             break;
           default:
             throw new Error(`cannot assign record type ${run.recordType}`);
@@ -543,10 +589,12 @@ export class AutomationsService implements OnModuleInit, OnModuleDestroy {
   async create(
     dto: CreateAutomationRuleDto,
     createdBy: string,
+    organizationId: Types.ObjectId,
   ): Promise<AutomationRuleResponseDto> {
     await this.validateRuleShape(dto);
 
     const rule = await this.ruleModel.create({
+      organizationId,
       name: dto.name.trim(),
       description: dto.description?.trim(),
       kind: dto.kind,
@@ -563,11 +611,11 @@ export class AutomationsService implements OnModuleInit, OnModuleDestroy {
     return toRuleResponseDto(rule);
   }
 
-  async findAll(query: RuleQueryDto) {
+  async findAll(query: RuleQueryDto, organizationId: Types.ObjectId) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 25;
 
-    const filter: Record<string, unknown> = {};
+    const filter: Record<string, unknown> = { organizationId };
     if (query.kind) filter.kind = query.kind;
     if (query.isActive !== undefined)
       filter.isActive = query.isActive === 'true';
@@ -593,7 +641,7 @@ export class AutomationsService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  async getStats(): Promise<AutomationStatsDto> {
+  async getStats(organizationId: Types.ObjectId): Promise<AutomationStatsDto> {
     const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
     const [
       totalRules,
@@ -603,13 +651,21 @@ export class AutomationsService implements OnModuleInit, OnModuleDestroy {
       runsLast24h,
       failedRunsLast24h,
     ] = await Promise.all([
-      this.ruleModel.countDocuments().exec(),
-      this.ruleModel.countDocuments({ isActive: true }).exec(),
-      this.ruleModel.countDocuments({ kind: 'trigger' }).exec(),
-      this.ruleModel.countDocuments({ kind: 'sla' }).exec(),
-      this.runModel.countDocuments({ createdAt: { $gte: dayAgo } }).exec(),
+      this.ruleModel.countDocuments({ organizationId }).exec(),
+      this.ruleModel.countDocuments({ organizationId, isActive: true }).exec(),
+      this.ruleModel
+        .countDocuments({ organizationId, kind: 'trigger' })
+        .exec(),
+      this.ruleModel.countDocuments({ organizationId, kind: 'sla' }).exec(),
       this.runModel
-        .countDocuments({ createdAt: { $gte: dayAgo }, status: 'failed' })
+        .countDocuments({ organizationId, createdAt: { $gte: dayAgo } })
+        .exec(),
+      this.runModel
+        .countDocuments({
+          organizationId,
+          createdAt: { $gte: dayAgo },
+          status: 'failed',
+        })
         .exec(),
     ]);
 
@@ -623,15 +679,19 @@ export class AutomationsService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  async findOne(id: string): Promise<AutomationRuleResponseDto> {
-    return toRuleResponseDto(await this.getByIdOrFail(id));
+  async findOne(
+    id: string,
+    organizationId: Types.ObjectId,
+  ): Promise<AutomationRuleResponseDto> {
+    return toRuleResponseDto(await this.getByIdOrFail(id, organizationId));
   }
 
   async update(
     id: string,
     dto: UpdateAutomationRuleDto,
+    organizationId: Types.ObjectId,
   ): Promise<AutomationRuleResponseDto> {
-    const rule = await this.getByIdOrFail(id);
+    const rule = await this.getByIdOrFail(id, organizationId);
 
     if (dto.name !== undefined) rule.name = dto.name.trim();
     if (dto.description !== undefined)
@@ -660,17 +720,17 @@ export class AutomationsService implements OnModuleInit, OnModuleDestroy {
     return toRuleResponseDto(rule);
   }
 
-  async remove(id: string): Promise<void> {
-    const rule = await this.getByIdOrFail(id);
+  async remove(id: string, organizationId: Types.ObjectId): Promise<void> {
+    const rule = await this.getByIdOrFail(id, organizationId);
     await this.ruleModel.deleteOne({ _id: rule._id }).exec();
     this.logger.log(`Automation rule deleted: ${id} ("${rule.name}")`);
   }
 
-  async findRuns(query: RunQueryDto) {
+  async findRuns(query: RunQueryDto, organizationId: Types.ObjectId) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 25;
 
-    const filter: Record<string, unknown> = {};
+    const filter: Record<string, unknown> = { organizationId };
     if (query.ruleId) filter.ruleId = new Types.ObjectId(query.ruleId);
     if (query.status) filter.status = query.status;
 
@@ -779,11 +839,16 @@ export class AutomationsService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** Load a rule by id, rejecting malformed ids with a 404 instead of a Mongoose CastError (500). */
-  private async getByIdOrFail(id: string): Promise<AutomationRuleDocument> {
+  private async getByIdOrFail(
+    id: string,
+    organizationId: Types.ObjectId,
+  ): Promise<AutomationRuleDocument> {
     if (!isValidObjectId(id)) {
       throw new NotFoundException(`Automation rule with ID ${id} not found`);
     }
-    const rule = await this.ruleModel.findById(id).exec();
+    const rule = await this.ruleModel
+      .findOne({ _id: id, organizationId })
+      .exec();
     if (!rule) {
       throw new NotFoundException(`Automation rule with ID ${id} not found`);
     }

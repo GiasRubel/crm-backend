@@ -109,6 +109,7 @@ export class ActivitiesService {
   async create(
     dto: CreateActivityDto,
     createdBy: string,
+    organizationId: Types.ObjectId,
   ): Promise<ActivityResponseDto> {
     if ((dto.relatedType == null) !== (dto.relatedId == null)) {
       throw new BadRequestException(
@@ -160,6 +161,7 @@ export class ActivitiesService {
       dto.status ?? (isCommunication && !dto.startAt ? 'completed' : 'pending');
 
     const activity = await this.activityModel.create({
+      organizationId,
       type: dto.type,
       subject: dto.subject.trim(),
       description: dto.description?.trim(),
@@ -190,7 +192,11 @@ export class ActivitiesService {
 
   // ── Read ────────────────────────────────────────────────────────────────
 
-  async findAll(query: ActivityQueryDto, requesterKeycloakId: string) {
+  async findAll(
+    query: ActivityQueryDto,
+    requesterKeycloakId: string,
+    organizationId: Types.ObjectId,
+  ) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 10;
     const skip = (page - 1) * limit;
@@ -201,7 +207,7 @@ export class ActivitiesService {
       );
     }
 
-    const conditions: Record<string, unknown>[] = [];
+    const conditions: Record<string, unknown>[] = [{ organizationId }];
 
     if (query.search?.trim()) {
       const searchRegex = new RegExp(escapeRegExp(query.search.trim()), 'i');
@@ -222,7 +228,10 @@ export class ActivitiesService {
     }
     if (query.due) conditions.push(this.dueWindowFilter(query.due));
 
-    const visibility = await this.buildVisibilityFilter(requesterKeycloakId);
+    const visibility = await this.buildVisibilityFilter(
+      requesterKeycloakId,
+      organizationId,
+    );
     if (visibility) conditions.push(visibility);
 
     const filter: Record<string, unknown> =
@@ -256,7 +265,10 @@ export class ActivitiesService {
     };
   }
 
-  async getStats(requesterKeycloakId: string): Promise<ActivityStatsDto> {
+  async getStats(
+    requesterKeycloakId: string,
+    organizationId: Types.ObjectId,
+  ): Promise<ActivityStatsDto> {
     const now = new Date();
     const startOfToday = new Date(now);
     startOfToday.setHours(0, 0, 0, 0);
@@ -267,8 +279,13 @@ export class ActivitiesService {
     startOfMonth.setHours(0, 0, 0, 0);
     const inSevenDays = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
 
-    const visibility =
-      (await this.buildVisibilityFilter(requesterKeycloakId)) ?? {};
+    const visibility = {
+      organizationId,
+      ...((await this.buildVisibilityFilter(
+        requesterKeycloakId,
+        organizationId,
+      )) ?? {}),
+    };
 
     const [
       openTasks,
@@ -332,16 +349,21 @@ export class ActivitiesService {
   async findOne(
     id: string,
     requesterKeycloakId: string,
+    organizationId: Types.ObjectId,
   ): Promise<ActivityResponseDto> {
-    const activity = await this.getByIdOrFail(id);
-    await this.assertCanView(activity, requesterKeycloakId);
+    const activity = await this.getByIdOrFail(id, organizationId);
+    await this.assertCanView(activity, requesterKeycloakId, organizationId);
     return this.mapOne(activity);
   }
 
   /** iCalendar (.ics) rendering for calendar import (Outlook/Google/Exchange). */
-  async getIcs(id: string, requesterKeycloakId: string): Promise<string> {
-    const activity = await this.getByIdOrFail(id);
-    await this.assertCanView(activity, requesterKeycloakId);
+  async getIcs(
+    id: string,
+    requesterKeycloakId: string,
+    organizationId: Types.ObjectId,
+  ): Promise<string> {
+    const activity = await this.getByIdOrFail(id, organizationId);
+    await this.assertCanView(activity, requesterKeycloakId, organizationId);
     if (!activity.startAt && !activity.dueAt) {
       throw new BadRequestException(
         'This activity has no date to export — set a due date or schedule it first',
@@ -356,9 +378,10 @@ export class ActivitiesService {
     id: string,
     dto: UpdateActivityDto,
     requesterKeycloakId: string,
+    organizationId: Types.ObjectId,
   ): Promise<ActivityResponseDto> {
-    const activity = await this.getByIdOrFail(id);
-    await this.assertCanView(activity, requesterKeycloakId);
+    const activity = await this.getByIdOrFail(id, organizationId);
+    await this.assertCanView(activity, requesterKeycloakId, organizationId);
 
     if (dto.subject !== undefined) activity.subject = dto.subject.trim();
     if (dto.description !== undefined)
@@ -389,9 +412,10 @@ export class ActivitiesService {
     id: string,
     dto: SetActivityStatusDto,
     requesterKeycloakId: string,
+    organizationId: Types.ObjectId,
   ): Promise<ActivityResponseDto> {
-    const activity = await this.getByIdOrFail(id);
-    await this.assertCanView(activity, requesterKeycloakId);
+    const activity = await this.getByIdOrFail(id, organizationId);
+    await this.assertCanView(activity, requesterKeycloakId, organizationId);
 
     if (activity.status === dto.status) {
       return this.mapOne(activity);
@@ -413,8 +437,9 @@ export class ActivitiesService {
   async assign(
     id: string,
     dto: AssignActivityDto,
+    organizationId: Types.ObjectId,
   ): Promise<ActivityResponseDto> {
-    const activity = await this.getByIdOrFail(id);
+    const activity = await this.getByIdOrFail(id, organizationId);
 
     if (dto.assignedToId !== undefined) {
       await this.getStaffUserOrFail(dto.assignedToId);
@@ -451,8 +476,8 @@ export class ActivitiesService {
     return this.mapOne(activity);
   }
 
-  async remove(id: string): Promise<void> {
-    const activity = await this.getByIdOrFail(id);
+  async remove(id: string, organizationId: Types.ObjectId): Promise<void> {
+    const activity = await this.getByIdOrFail(id, organizationId);
     await this.activityModel.deleteOne({ _id: activity._id }).exec();
     this.logger.log(`Activity deleted: ${id}`);
   }
@@ -568,6 +593,7 @@ export class ActivitiesService {
    */
   private async buildVisibilityFilter(
     keycloakId: string,
+    organizationId: Types.ObjectId,
   ): Promise<Record<string, unknown> | null> {
     const appUser = await this.usersService.findByKeycloakId(keycloakId);
     if (!appUser) {
@@ -581,7 +607,10 @@ export class ActivitiesService {
       return null;
     }
 
-    const teamIds = await this.teamsService.getTeamIdsForMember(keycloakId);
+    const teamIds = await this.teamsService.getTeamIdsForMember(
+      keycloakId,
+      organizationId,
+    );
     return {
       $or: [
         { assignedToId: keycloakId },
@@ -595,6 +624,7 @@ export class ActivitiesService {
   private async assertCanView(
     activity: ActivityDocument,
     keycloakId: string,
+    organizationId: Types.ObjectId,
   ): Promise<void> {
     const appUser = await this.usersService.findByKeycloakId(keycloakId);
     if (!appUser) {
@@ -613,7 +643,10 @@ export class ActivitiesService {
       return;
     }
     if (activity.assignedTeamId) {
-      const teamIds = await this.teamsService.getTeamIdsForMember(keycloakId);
+      const teamIds = await this.teamsService.getTeamIdsForMember(
+        keycloakId,
+        organizationId,
+      );
       if (teamIds.some((teamId) => teamId.equals(activity.assignedTeamId))) {
         return;
       }
@@ -828,11 +861,16 @@ export class ActivitiesService {
   }
 
   /** Load an activity by id, rejecting malformed ids with a 404 instead of a Mongoose CastError (500). */
-  private async getByIdOrFail(id: string): Promise<ActivityDocument> {
+  private async getByIdOrFail(
+    id: string,
+    organizationId: Types.ObjectId,
+  ): Promise<ActivityDocument> {
     if (!isValidObjectId(id)) {
       throw new NotFoundException(`Activity with ID ${id} not found`);
     }
-    const activity = await this.activityModel.findById(id).exec();
+    const activity = await this.activityModel
+      .findOne({ _id: id, organizationId })
+      .exec();
     if (!activity) {
       throw new NotFoundException(`Activity with ID ${id} not found`);
     }

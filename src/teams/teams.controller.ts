@@ -10,6 +10,8 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
+import type { Types } from 'mongoose';
+import { CurrentOrg } from '../auth/decorators/current-org.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import type { KeycloakJwtPayload } from '../auth/interfaces/keycloak-jwt-payload.interface';
@@ -25,53 +27,76 @@ export class TeamsController {
 
   @Post()
   @Roles(AppRole.Admin, AppRole.Administrator)
-  create(@Body() dto: CreateTeamDto, @CurrentUser() user: KeycloakJwtPayload) {
-    return this.teamsService.create(dto, user.sub);
+  create(
+    @Body() dto: CreateTeamDto,
+    @CurrentUser() user: KeycloakJwtPayload,
+    @CurrentOrg() organizationId: Types.ObjectId,
+  ) {
+    return this.teamsService.create(dto, user.sub, organizationId);
   }
 
   /** All staff can read teams (needed to render assignments and their own team). */
   @Get()
   @Roles(AppRole.Admin, AppRole.Administrator, AppRole.User)
-  findAll(@Query() query: TeamQueryDto) {
-    return this.teamsService.findAll(query);
+  findAll(
+    @Query() query: TeamQueryDto,
+    @CurrentOrg() organizationId: Types.ObjectId,
+  ) {
+    return this.teamsService.findAll(query, organizationId);
   }
 
   @Get('stats')
   @Roles(AppRole.Admin, AppRole.Administrator, AppRole.User)
-  getStats() {
-    return this.teamsService.getStats();
+  getStats(@CurrentOrg() organizationId: Types.ObjectId) {
+    return this.teamsService.getStats(organizationId);
   }
 
   /** Active teams the calling staff user is a member of. */
   @Get('my')
   @Roles(AppRole.Admin, AppRole.Administrator, AppRole.User)
-  findMyTeams(@CurrentUser() user: KeycloakJwtPayload) {
-    return this.teamsService.findMyTeams(user.sub);
+  findMyTeams(
+    @CurrentUser() user: KeycloakJwtPayload,
+    @CurrentOrg() organizationId: Types.ObjectId,
+  ) {
+    return this.teamsService.findMyTeams(user.sub, organizationId);
   }
 
   /** Territory routing preview: which team would receive a record for this region? */
   @Get('match')
   @Roles(AppRole.Admin, AppRole.Administrator)
-  matchRegion(@Query('region') region = '') {
-    return this.teamsService.matchRegion(region);
+  matchRegion(
+    @Query('region') region = '',
+    @CurrentOrg() organizationId: Types.ObjectId,
+  ) {
+    return this.teamsService.matchRegion(region, organizationId);
   }
 
   @Get(':id')
   @Roles(AppRole.Admin, AppRole.Administrator, AppRole.User)
-  findOne(@Param('id') id: string) {
-    return this.teamsService.findOne(id);
+  findOne(
+    @Param('id') id: string,
+    @CurrentOrg() organizationId: Types.ObjectId,
+  ) {
+    return this.teamsService.findOne(id, organizationId);
   }
 
   @Patch(':id')
   @Roles(AppRole.Admin, AppRole.Administrator)
-  update(@Param('id') id: string, @Body() dto: UpdateTeamDto) {
-    return this.teamsService.update(id, dto);
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateTeamDto,
+    @CurrentOrg() organizationId: Types.ObjectId,
+  ) {
+    return this.teamsService.update(id, dto, organizationId);
   }
 
   @Delete(':id')
   @Roles(AppRole.Admin, AppRole.Administrator)
   @HttpCode(HttpStatus.NO_CONTENT)
-  remove(@Param('id') id: string) {
-    return this.teamsService.remove(id);
+  remove(
+    @Param('id') id: string,
+    @CurrentOrg() organizationId: Types.ObjectId,
+  ) {
+    return this.teamsService.remove(id, organizationId);
   }
 }

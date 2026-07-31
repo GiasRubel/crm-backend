@@ -5,6 +5,9 @@ export type CustomerDocument = HydratedDocument<Customer>;
 
 @Schema({ timestamps: true })
 export class Customer {
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Organization', required: true, index: true })
+  organizationId: Types.ObjectId;
+
   @Prop({ required: true, unique: true, index: true })
   keycloakId: string;
 

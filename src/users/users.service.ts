@@ -1,15 +1,92 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  Logger,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { ConfigService } from '@nestjs/config';
+import { Model, Types } from 'mongoose';
 import type { KeycloakJwtPayload } from '../auth/interfaces/keycloak-jwt-payload.interface';
+import { KeycloakAdminService } from '../keycloak-admin/keycloak-admin.service';
 import { AppRole } from './app-role.enum';
+import { CreateStaffDto } from './dto/create-staff.dto';
+import { StaffUserResponseDto } from './dto/staff-user-response.dto';
 import { UserResponseDto } from './dto/user-response.dto';
-import { toUserResponseDto } from './mappers/user.mapper';
+import { toStaffUserResponseDto, toUserResponseDto } from './mappers/user.mapper';
 import { User, UserDocument } from './users.schema';
+import { DefaultOrgService } from '../bootstrap/default-org.service';
+import { DeploymentMode, getDeploymentMode } from '../config/deployment-mode';
 
 @Injectable()
 export class UsersService {
-  constructor(@InjectModel(User.name) private userModel: Model<UserDocument>) {}
+  private readonly logger = new Logger(UsersService.name);
+
+  constructor(
+    @InjectModel(User.name) private userModel: Model<UserDocument>,
+    private readonly configService: ConfigService,
+    private readonly defaultOrgService: DefaultOrgService,
+    private readonly keycloakAdminService: KeycloakAdminService,
+  ) {}
+
+  /**
+   * Admin-invited teammate: creates the Keycloak identity, sends the
+   * "set your password" email, then mirrors it into Mongo. Mirrors
+   * CustomersService.create's rollback discipline.
+   */
+  async createStaff(
+    dto: CreateStaffDto,
+    organizationId: Types.ObjectId,
+  ): Promise<StaffUserResponseDto> {
+    const email = dto.email.trim().toLowerCase();
+
+    if (await this.findByEmail(email)) {
+      throw new ConflictException('A user with this email already exists');
+    }
+
+    const keycloakId = await this.keycloakAdminService.createUser(
+      email,
+      dto.firstName.trim(),
+      dto.lastName.trim(),
+    );
+
+    try {
+      const created = await this.createUser(
+        keycloakId,
+        email,
+        dto.firstName,
+        dto.lastName,
+        dto.role,
+        organizationId,
+      );
+
+      try {
+        await this.keycloakAdminService.sendSetPasswordEmail(keycloakId);
+      } catch (emailError) {
+        this.logger.error(
+          `Staff user created successfully, but Keycloak failed to send the initial invitation email to ${email}:`,
+          emailError,
+        );
+      }
+
+      return toStaffUserResponseDto(created);
+    } catch (error) {
+      this.logger.error(
+        `Failed to write staff user to MongoDB. Rolling back Keycloak user ${keycloakId}`,
+        error,
+      );
+      try {
+        await this.keycloakAdminService.deleteUser(keycloakId);
+      } catch (kcError) {
+        this.logger.error(
+          `Rollback critical failure: could not delete Keycloak user ${keycloakId}:`,
+          kcError,
+        );
+      }
+      throw error;
+    }
+  }
 
   async findByKeycloakId(keycloakId: string): Promise<UserDocument | null> {
     return this.userModel.findOne({ keycloakId }).exec();
@@ -43,14 +120,35 @@ export class UsersService {
     email: string,
     firstName: string,
     lastName: string,
+    organizationId: Types.ObjectId,
   ): Promise<UserDocument> {
     return this.userModel.create({
+      organizationId,
       keycloakId,
       email: email.trim().toLowerCase(),
       username: email.trim().toLowerCase(),
       firstName: firstName.trim(),
       lastName: lastName.trim(),
       role: AppRole.Customer,
+    });
+  }
+
+  async createUser(
+    keycloakId: string,
+    email: string,
+    firstName: string,
+    lastName: string,
+    role: AppRole,
+    organizationId: Types.ObjectId,
+  ): Promise<UserDocument> {
+    return this.userModel.create({
+      organizationId,
+      keycloakId,
+      email: email.trim().toLowerCase(),
+      username: email.trim().toLowerCase(),
+      firstName: firstName.trim(),
+      lastName: lastName.trim(),
+      role,
     });
   }
 
@@ -94,7 +192,34 @@ export class UsersService {
     payload: KeycloakJwtPayload,
   ): Promise<UserDocument> {
     const identity = this.extractIdentity(payload);
-    return this.userModel.create({ ...identity, role: AppRole.User });
+    const existing = await this.findByEmail(identity.email);
+
+    if (existing) {
+      existing.keycloakId = payload.sub;
+      await existing.save();
+      return this.syncIdentityFields(existing, payload);
+    }
+
+    // Standalone (Regular License) deployments have no admin-provisioning
+    // flow — the first person to log in becomes the org's Admin.
+    if (getDeploymentMode(this.configService) === DeploymentMode.Standalone) {
+      const userCount = await this.userModel.estimatedDocumentCount().exec();
+      if (userCount === 0) {
+        const organizationId = await this.defaultOrgService.getDefaultOrganizationId();
+        return this.createUser(
+          payload.sub,
+          identity.email,
+          identity.firstName,
+          identity.lastName,
+          AppRole.Admin,
+          organizationId,
+        );
+      }
+    }
+
+    throw new ForbiddenException(
+      'Your account has not been provisioned yet — contact your administrator',
+    );
   }
 
   private async syncIdentityFields(

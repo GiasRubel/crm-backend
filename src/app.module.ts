@@ -20,6 +20,9 @@ import { AutomationsModule } from './automations/automations.module';
 import { KbModule } from './kb/kb.module';
 import { TicketsModule } from './tickets/tickets.module';
 import { ReportsModule } from './reports/reports.module';
+import { OrganizationsModule } from './organizations/organizations.module';
+import { SubscriptionsModule } from './subscriptions/subscriptions.module';
+import { LicensingModule } from './licensing/licensing.module';
 
 @Module({
   imports: [
@@ -32,8 +35,11 @@ import { ReportsModule } from './reports/reports.module';
     }),
     KeycloakAdminModule, // Global — available to all modules
     EventsModule, // Global — CrmEventBus injectable everywhere
+    LicensingModule, // Must run before AuthModule: gates the whole API on activation
     AuthModule,
     UsersModule,
+    OrganizationsModule,
+    SubscriptionsModule,
     MailModule,
     PasswordModule,
     TeamsModule,

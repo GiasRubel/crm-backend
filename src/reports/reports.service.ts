@@ -121,8 +121,14 @@ export class ReportsService {
 
   // ── Dashboard ──────────────────────────────────────────────────────────────
 
-  async getDashboard(keycloakId: string): Promise<DashboardResponseDto> {
-    const vis = (await this.buildVisibilityFilter(keycloakId)) ?? {};
+  async getDashboard(
+    keycloakId: string,
+    organizationId: Types.ObjectId,
+  ): Promise<DashboardResponseDto> {
+    const vis = {
+      organizationId,
+      ...((await this.buildVisibilityFilter(keycloakId, organizationId)) ?? {}),
+    };
 
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -323,8 +329,12 @@ export class ReportsService {
 
   async getTeamPerformance(
     keycloakId: string,
+    organizationId: Types.ObjectId,
   ): Promise<TeamPerformanceResponseDto> {
-    const vis = (await this.buildVisibilityFilter(keycloakId)) ?? {};
+    const vis = {
+      organizationId,
+      ...((await this.buildVisibilityFilter(keycloakId, organizationId)) ?? {}),
+    };
 
     const [reps, teamAgg] = await Promise.all([
       this.computeRepPerformance(vis),
@@ -452,12 +462,17 @@ export class ReportsService {
   async runReport(
     dto: RunReportDto,
     keycloakId: string,
+    organizationId: Types.ObjectId,
   ): Promise<ReportResultDto> {
     const dataset = getDataset(dto.dataset);
     if (!dataset) throw new BadRequestException('Unknown dataset');
     const model = this.models[dataset.model];
 
-    const vis = await this.buildVisibilityFilter(keycloakId);
+    const roleVis = await this.buildVisibilityFilter(
+      keycloakId,
+      organizationId,
+    );
+    const vis = { organizationId, ...(roleVis ?? {}) };
     const match = buildMatch(dataset, dto.filters, dto.dateRange, vis);
 
     if (dto.metrics && dto.metrics.length > 0) {
@@ -632,10 +647,12 @@ export class ReportsService {
   async createSaved(
     dto: CreateSavedReportDto,
     keycloakId: string,
+    organizationId: Types.ObjectId,
   ): Promise<SavedReportResponseDto> {
     this.validateDefinition(dto);
 
     const report = await this.savedReportModel.create({
+      organizationId,
       name: dto.name.trim(),
       description: dto.description?.trim(),
       dataset: dto.dataset,
@@ -655,11 +672,17 @@ export class ReportsService {
     return this.mapSaved(report, keycloakId);
   }
 
-  async findSaved(keycloakId: string): Promise<SavedReportResponseDto[]> {
+  async findSaved(
+    keycloakId: string,
+    organizationId: Types.ObjectId,
+  ): Promise<SavedReportResponseDto[]> {
     const admin = await this.isAdmin(keycloakId);
     const filter = admin
-      ? {}
-      : { $or: [{ shared: true }, { createdBy: keycloakId }] };
+      ? { organizationId }
+      : {
+          organizationId,
+          $or: [{ shared: true }, { createdBy: keycloakId }],
+        };
 
     const reports = await this.savedReportModel
       .find(filter)
@@ -672,8 +695,9 @@ export class ReportsService {
   async findSavedOne(
     id: string,
     keycloakId: string,
+    organizationId: Types.ObjectId,
   ): Promise<SavedReportResponseDto> {
-    const report = await this.getSavedOrFail(id);
+    const report = await this.getSavedOrFail(id, organizationId);
     await this.assertCanViewSaved(report, keycloakId);
     return this.mapSaved(report, keycloakId);
   }
@@ -682,8 +706,9 @@ export class ReportsService {
     id: string,
     dto: CreateSavedReportDto,
     keycloakId: string,
+    organizationId: Types.ObjectId,
   ): Promise<SavedReportResponseDto> {
-    const report = await this.getSavedOrFail(id);
+    const report = await this.getSavedOrFail(id, organizationId);
     await this.assertCanManageSaved(report, keycloakId);
     this.validateDefinition(dto);
 
@@ -705,8 +730,12 @@ export class ReportsService {
     return this.mapSaved(report, keycloakId);
   }
 
-  async removeSaved(id: string, keycloakId: string): Promise<void> {
-    const report = await this.getSavedOrFail(id);
+  async removeSaved(
+    id: string,
+    keycloakId: string,
+    organizationId: Types.ObjectId,
+  ): Promise<void> {
+    const report = await this.getSavedOrFail(id, organizationId);
     await this.assertCanManageSaved(report, keycloakId);
     await this.savedReportModel.deleteOne({ _id: report._id }).exec();
     this.logger.log(`Saved report deleted: ${id}`);
@@ -716,9 +745,10 @@ export class ReportsService {
   async runSaved(
     id: string,
     keycloakId: string,
+    organizationId: Types.ObjectId,
     overrides?: Pick<RunReportDto, 'page' | 'limit' | 'sortBy' | 'sortOrder'>,
   ): Promise<ReportResultDto> {
-    const report = await this.getSavedOrFail(id);
+    const report = await this.getSavedOrFail(id, organizationId);
     await this.assertCanViewSaved(report, keycloakId);
 
     const dto: RunReportDto = {
@@ -734,7 +764,7 @@ export class ReportsService {
       page: overrides?.page ?? 1,
       limit: overrides?.limit ?? 25,
     };
-    return this.runReport(dto, keycloakId);
+    return this.runReport(dto, keycloakId, organizationId);
   }
 
   /** Dry-run the definition through the compilers to fail fast on save. */
@@ -756,6 +786,7 @@ export class ReportsService {
 
   private async buildVisibilityFilter(
     keycloakId: string,
+    organizationId: Types.ObjectId,
   ): Promise<Record<string, unknown> | null> {
     const appUser = await this.usersService.findByKeycloakId(keycloakId);
     if (!appUser) {
@@ -767,7 +798,10 @@ export class ReportsService {
     ) {
       return null;
     }
-    const teamIds = await this.teamsService.getTeamIdsForMember(keycloakId);
+    const teamIds = await this.teamsService.getTeamIdsForMember(
+      keycloakId,
+      organizationId,
+    );
     return {
       $or: [
         { assignedToId: keycloakId },
@@ -784,11 +818,16 @@ export class ReportsService {
     );
   }
 
-  private async getSavedOrFail(id: string): Promise<SavedReportDocument> {
+  private async getSavedOrFail(
+    id: string,
+    organizationId: Types.ObjectId,
+  ): Promise<SavedReportDocument> {
     if (!isValidObjectId(id)) {
       throw new NotFoundException(`Report with ID ${id} not found`);
     }
-    const report = await this.savedReportModel.findById(id).exec();
+    const report = await this.savedReportModel
+      .findOne({ _id: id, organizationId })
+      .exec();
     if (!report) {
       throw new NotFoundException(`Report with ID ${id} not found`);
     }

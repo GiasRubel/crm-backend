@@ -48,6 +48,9 @@ export type RelatedType = (typeof RELATED_TYPES)[number];
 
 @Schema({ timestamps: true })
 export class Activity {
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Organization', required: true, index: true })
+  organizationId: Types.ObjectId;
+
   @Prop({ type: String, enum: ACTIVITY_TYPES, required: true, index: true })
   type: ActivityType;
 

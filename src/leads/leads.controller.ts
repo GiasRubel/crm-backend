@@ -10,6 +10,8 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
+import type { Types } from 'mongoose';
+import { CurrentOrg } from '../auth/decorators/current-org.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Public } from '../auth/decorators/public.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -42,8 +44,12 @@ export class LeadsController {
 
   @Post()
   @Roles(AppRole.Admin, AppRole.Administrator, AppRole.User)
-  create(@Body() dto: CreateLeadDto, @CurrentUser() user: KeycloakJwtPayload) {
-    return this.leadsService.create(dto, user.sub);
+  create(
+    @Body() dto: CreateLeadDto,
+    @CurrentUser() user: KeycloakJwtPayload,
+    @CurrentOrg() organizationId: Types.ObjectId,
+  ) {
+    return this.leadsService.create(dto, user.sub, organizationId);
   }
 
   @Get()
@@ -51,20 +57,28 @@ export class LeadsController {
   findAll(
     @Query() query: LeadQueryDto,
     @CurrentUser() user: KeycloakJwtPayload,
+    @CurrentOrg() organizationId: Types.ObjectId,
   ) {
-    return this.leadsService.findAll(query, user.sub);
+    return this.leadsService.findAll(query, user.sub, organizationId);
   }
 
   @Get('stats')
   @Roles(AppRole.Admin, AppRole.Administrator, AppRole.User)
-  getStats(@CurrentUser() user: KeycloakJwtPayload) {
-    return this.leadsService.getStats(user.sub);
+  getStats(
+    @CurrentUser() user: KeycloakJwtPayload,
+    @CurrentOrg() organizationId: Types.ObjectId,
+  ) {
+    return this.leadsService.getStats(user.sub, organizationId);
   }
 
   @Get(':id')
   @Roles(AppRole.Admin, AppRole.Administrator, AppRole.User)
-  findOne(@Param('id') id: string, @CurrentUser() user: KeycloakJwtPayload) {
-    return this.leadsService.findOne(id, user.sub);
+  findOne(
+    @Param('id') id: string,
+    @CurrentUser() user: KeycloakJwtPayload,
+    @CurrentOrg() organizationId: Types.ObjectId,
+  ) {
+    return this.leadsService.findOne(id, user.sub, organizationId);
   }
 
   @Patch(':id')
@@ -73,8 +87,9 @@ export class LeadsController {
     @Param('id') id: string,
     @Body() dto: UpdateLeadDto,
     @CurrentUser() user: KeycloakJwtPayload,
+    @CurrentOrg() organizationId: Types.ObjectId,
   ) {
-    return this.leadsService.update(id, dto, user.sub);
+    return this.leadsService.update(id, dto, user.sub, organizationId);
   }
 
   /** Log an engagement touchpoint; the lead score is recomputed. */
@@ -84,15 +99,25 @@ export class LeadsController {
     @Param('id') id: string,
     @Body() dto: AddEngagementDto,
     @CurrentUser() user: KeycloakJwtPayload,
+    @CurrentOrg() organizationId: Types.ObjectId,
   ) {
-    return this.leadsService.addEngagement(id, dto, user.sub);
+    return this.leadsService.addEngagement(
+      id,
+      dto,
+      user.sub,
+      organizationId,
+    );
   }
 
   /** Record routing: set/clear the record owner and/or the assigned team. */
   @Patch(':id/assign')
   @Roles(AppRole.Admin, AppRole.Administrator)
-  assign(@Param('id') id: string, @Body() dto: AssignLeadDto) {
-    return this.leadsService.assign(id, dto);
+  assign(
+    @Param('id') id: string,
+    @Body() dto: AssignLeadDto,
+    @CurrentOrg() organizationId: Types.ObjectId,
+  ) {
+    return this.leadsService.assign(id, dto, organizationId);
   }
 
   /** Convert a qualified lead into a Customer (+ optionally an Opportunity). */
@@ -102,14 +127,18 @@ export class LeadsController {
     @Param('id') id: string,
     @Body() dto: ConvertLeadDto,
     @CurrentUser() user: KeycloakJwtPayload,
+    @CurrentOrg() organizationId: Types.ObjectId,
   ) {
-    return this.leadsService.convert(id, dto, user.sub);
+    return this.leadsService.convert(id, dto, user.sub, organizationId);
   }
 
   @Delete(':id')
   @Roles(AppRole.Admin, AppRole.Administrator)
   @HttpCode(HttpStatus.NO_CONTENT)
-  remove(@Param('id') id: string) {
-    return this.leadsService.remove(id);
+  remove(
+    @Param('id') id: string,
+    @CurrentOrg() organizationId: Types.ObjectId,
+  ) {
+    return this.leadsService.remove(id, organizationId);
   }
 }

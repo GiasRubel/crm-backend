@@ -60,8 +60,9 @@ export class AccountsService {
   async create(
     dto: CreateAccountDto,
     createdBy: string,
+    organizationId: Types.ObjectId,
   ): Promise<AccountResponseDto> {
-    await this.assertNameAvailable(dto.name);
+    await this.assertNameAvailable(dto.name, organizationId);
 
     const assignment = await this.resolveAssignmentTargets(
       dto.assignedToId,
@@ -69,6 +70,7 @@ export class AccountsService {
     );
 
     const account = await this.accountModel.create({
+      organizationId,
       name: dto.name.trim(),
       industry: dto.industry,
       website: dto.website?.trim(),
@@ -91,14 +93,15 @@ export class AccountsService {
     id: string,
     dto: UpdateAccountDto,
     requesterKeycloakId: string,
+    organizationId: Types.ObjectId,
   ): Promise<AccountResponseDto> {
-    const account = await this.getByIdOrFail(id);
-    await this.assertCanView(account, requesterKeycloakId);
+    const account = await this.getByIdOrFail(id, organizationId);
+    await this.assertCanView(account, requesterKeycloakId, organizationId);
 
     if (dto.name !== undefined) {
       const newName = dto.name.trim();
       if (newName.toLowerCase() !== account.name.toLowerCase()) {
-        await this.assertNameAvailable(newName);
+        await this.assertNameAvailable(newName, organizationId);
       }
       account.name = newName;
     }
@@ -121,12 +124,16 @@ export class AccountsService {
 
   // ── Read ────────────────────────────────────────────────────────────────
 
-  async findAll(query: AccountQueryDto, requesterKeycloakId: string) {
+  async findAll(
+    query: AccountQueryDto,
+    requesterKeycloakId: string,
+    organizationId: Types.ObjectId,
+  ) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 10;
     const skip = (page - 1) * limit;
 
-    const conditions: Record<string, unknown>[] = [];
+    const conditions: Record<string, unknown>[] = [{ organizationId }];
 
     if (query.search?.trim()) {
       const searchRegex = new RegExp(escapeRegExp(query.search.trim()), 'i');
@@ -143,7 +150,10 @@ export class AccountsService {
     if (query.size) conditions.push({ size: query.size });
     if (query.status) conditions.push({ status: query.status });
 
-    const visibility = await this.buildVisibilityFilter(requesterKeycloakId);
+    const visibility = await this.buildVisibilityFilter(
+      requesterKeycloakId,
+      organizationId,
+    );
     if (visibility) conditions.push(visibility);
 
     const filter: Record<string, unknown> =
@@ -177,13 +187,21 @@ export class AccountsService {
     };
   }
 
-  async getStats(requesterKeycloakId: string): Promise<AccountStatsDto> {
+  async getStats(
+    requesterKeycloakId: string,
+    organizationId: Types.ObjectId,
+  ): Promise<AccountStatsDto> {
     const startOfMonth = new Date();
     startOfMonth.setDate(1);
     startOfMonth.setHours(0, 0, 0, 0);
 
-    const visibility =
-      (await this.buildVisibilityFilter(requesterKeycloakId)) ?? {};
+    const visibility = {
+      organizationId,
+      ...((await this.buildVisibilityFilter(
+        requesterKeycloakId,
+        organizationId,
+      )) ?? {}),
+    };
 
     const [byStatus, total, newThisMonth] = await Promise.all([
       this.accountModel
@@ -215,9 +233,10 @@ export class AccountsService {
   async findOne(
     id: string,
     requesterKeycloakId: string,
+    organizationId: Types.ObjectId,
   ): Promise<AccountResponseDto> {
-    const account = await this.getByIdOrFail(id);
-    await this.assertCanView(account, requesterKeycloakId);
+    const account = await this.getByIdOrFail(id, organizationId);
+    await this.assertCanView(account, requesterKeycloakId, organizationId);
     return this.mapOne(account);
   }
 
@@ -229,9 +248,10 @@ export class AccountsService {
   async getSummary(
     id: string,
     requesterKeycloakId: string,
+    organizationId: Types.ObjectId,
   ): Promise<AccountSummaryDto> {
-    const account = await this.getByIdOrFail(id);
-    await this.assertCanView(account, requesterKeycloakId);
+    const account = await this.getByIdOrFail(id, organizationId);
+    await this.assertCanView(account, requesterKeycloakId, organizationId);
 
     const [contacts, contactCount, opportunities, valueAgg] = await Promise.all(
       [
@@ -304,8 +324,12 @@ export class AccountsService {
    * Record routing: set or clear the record owner and/or the assigned team.
    * Omitted fields are unchanged; null clears a field.
    */
-  async assign(id: string, dto: AssignAccountDto): Promise<AccountResponseDto> {
-    const account = await this.getByIdOrFail(id);
+  async assign(
+    id: string,
+    dto: AssignAccountDto,
+    organizationId: Types.ObjectId,
+  ): Promise<AccountResponseDto> {
+    const account = await this.getByIdOrFail(id, organizationId);
 
     const sets: Record<string, unknown> = {};
     const unsets: Record<string, ''> = {};
@@ -378,8 +402,8 @@ export class AccountsService {
    * Deleting an account keeps its people and deals: linked contacts and
    * opportunities are unlinked (accountId cleared), never cascaded.
    */
-  async remove(id: string): Promise<void> {
-    const account = await this.getByIdOrFail(id);
+  async remove(id: string, organizationId: Types.ObjectId): Promise<void> {
+    const account = await this.getByIdOrFail(id, organizationId);
 
     const [contactResult, opportunityResult] = await Promise.all([
       this.contactModel
@@ -427,6 +451,7 @@ export class AccountsService {
    */
   private async buildVisibilityFilter(
     keycloakId: string,
+    organizationId: Types.ObjectId,
   ): Promise<Record<string, unknown> | null> {
     const appUser = await this.usersService.findByKeycloakId(keycloakId);
     if (!appUser) {
@@ -440,7 +465,10 @@ export class AccountsService {
       return null;
     }
 
-    const teamIds = await this.teamsService.getTeamIdsForMember(keycloakId);
+    const teamIds = await this.teamsService.getTeamIdsForMember(
+      keycloakId,
+      organizationId,
+    );
     return {
       $or: [
         { assignedToId: keycloakId },
@@ -454,6 +482,7 @@ export class AccountsService {
   private async assertCanView(
     account: AccountDocument,
     keycloakId: string,
+    organizationId: Types.ObjectId,
   ): Promise<void> {
     const appUser = await this.usersService.findByKeycloakId(keycloakId);
     if (!appUser) {
@@ -472,7 +501,10 @@ export class AccountsService {
       return;
     }
     if (account.assignedTeamId) {
-      const teamIds = await this.teamsService.getTeamIdsForMember(keycloakId);
+      const teamIds = await this.teamsService.getTeamIdsForMember(
+        keycloakId,
+        organizationId,
+      );
       if (teamIds.some((teamId) => teamId.equals(account.assignedTeamId))) {
         return;
       }
@@ -484,9 +516,13 @@ export class AccountsService {
 
   // ── Helpers ─────────────────────────────────────────────────────────────
 
-  private async assertNameAvailable(name: string): Promise<void> {
+  private async assertNameAvailable(
+    name: string,
+    organizationId: Types.ObjectId,
+  ): Promise<void> {
     const existing = await this.accountModel
       .findOne({
+        organizationId,
         name: { $regex: `^${escapeRegExp(name.trim())}$`, $options: 'i' },
       })
       .exec();
@@ -622,11 +658,16 @@ export class AccountsService {
   }
 
   /** Load an account by id, rejecting malformed ids with a 404 instead of a Mongoose CastError (500). */
-  private async getByIdOrFail(id: string): Promise<AccountDocument> {
+  private async getByIdOrFail(
+    id: string,
+    organizationId: Types.ObjectId,
+  ): Promise<AccountDocument> {
     if (!isValidObjectId(id)) {
       throw new NotFoundException(`Account with ID ${id} not found`);
     }
-    const account = await this.accountModel.findById(id).exec();
+    const account = await this.accountModel
+      .findOne({ _id: id, organizationId })
+      .exec();
     if (!account) {
       throw new NotFoundException(`Account with ID ${id} not found`);
     }

@@ -37,9 +37,10 @@ export class TeamsService {
   async create(
     dto: CreateTeamDto,
     createdBy: string,
+    organizationId: Types.ObjectId,
   ): Promise<TeamResponseDto> {
     const name = dto.name.trim();
-    await this.assertNameAvailable(name);
+    await this.assertNameAvailable(name, organizationId);
 
     const { memberIds, leaderId } = await this.resolveMembership(
       dto.memberIds ?? [],
@@ -47,6 +48,7 @@ export class TeamsService {
     );
 
     const team = await this.teamModel.create({
+      organizationId,
       name,
       description: dto.description?.trim(),
       regions: this.normalizeRegions(dto.regions),
@@ -60,12 +62,12 @@ export class TeamsService {
     return this.toResponse(team);
   }
 
-  async findAll(query: TeamQueryDto) {
+  async findAll(query: TeamQueryDto, organizationId: Types.ObjectId) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 10;
     const skip = (page - 1) * limit;
 
-    const filter: Record<string, unknown> = {};
+    const filter: Record<string, unknown> = { organizationId };
 
     if (query.search?.trim()) {
       const searchRegex = new RegExp(escapeRegExp(query.search.trim()), 'i');
@@ -106,21 +108,22 @@ export class TeamsService {
     };
   }
 
-  async getStats(): Promise<TeamStatsDto> {
+  async getStats(organizationId: Types.ObjectId): Promise<TeamStatsDto> {
     const [total, active, memberAgg, assignedCustomers] = await Promise.all([
-      this.teamModel.countDocuments().exec(),
-      this.teamModel.countDocuments({ isActive: true }).exec(),
+      this.teamModel.countDocuments({ organizationId }).exec(),
+      this.teamModel.countDocuments({ organizationId, isActive: true }).exec(),
       this.teamModel
         .aggregate<{
           _id: null;
           members: string[];
         }>([
+          { $match: { organizationId } },
           { $unwind: '$memberIds' },
           { $group: { _id: null, members: { $addToSet: '$memberIds' } } },
         ])
         .exec(),
       this.customerModel
-        .countDocuments({ assignedTeamId: { $ne: null } })
+        .countDocuments({ organizationId, assignedTeamId: { $ne: null } })
         .exec(),
     ]);
 
@@ -133,15 +136,21 @@ export class TeamsService {
     };
   }
 
-  async findOne(id: string): Promise<TeamResponseDto> {
-    const team = await this.getByIdOrFail(id);
+  async findOne(
+    id: string,
+    organizationId: Types.ObjectId,
+  ): Promise<TeamResponseDto> {
+    const team = await this.getByIdOrFail(id, organizationId);
     return this.toResponse(team);
   }
 
   /** Teams the calling staff user belongs to (active teams only). */
-  async findMyTeams(keycloakId: string): Promise<TeamResponseDto[]> {
+  async findMyTeams(
+    keycloakId: string,
+    organizationId: Types.ObjectId,
+  ): Promise<TeamResponseDto[]> {
     const teams = await this.teamModel
-      .find({ memberIds: keycloakId, isActive: true })
+      .find({ organizationId, memberIds: keycloakId, isActive: true })
       .sort({ name: 1 })
       .exec();
     return this.toResponses(teams);
@@ -151,12 +160,16 @@ export class TeamsService {
    * Territory routing: find the first active team whose regions contain the
    * given region tag (case-insensitive exact tag match).
    */
-  async matchRegion(region: string): Promise<{ team: TeamResponseDto | null }> {
+  async matchRegion(
+    region: string,
+    organizationId: Types.ObjectId,
+  ): Promise<{ team: TeamResponseDto | null }> {
     const tag = region.trim();
     if (!tag) return { team: null };
 
     const team = await this.teamModel
       .findOne({
+        organizationId,
         isActive: true,
         regions: { $regex: `^${escapeRegExp(tag)}$`, $options: 'i' },
       })
@@ -165,8 +178,12 @@ export class TeamsService {
     return { team: team ? await this.toResponse(team) : null };
   }
 
-  async update(id: string, dto: UpdateTeamDto): Promise<TeamResponseDto> {
-    const team = await this.getByIdOrFail(id);
+  async update(
+    id: string,
+    dto: UpdateTeamDto,
+    organizationId: Types.ObjectId,
+  ): Promise<TeamResponseDto> {
+    const team = await this.getByIdOrFail(id, organizationId);
 
     const updates: Partial<Team> = {};
     const unsets: Record<string, ''> = {};
@@ -174,7 +191,7 @@ export class TeamsService {
     if (dto.name !== undefined) {
       const name = dto.name.trim();
       if (name !== team.name) {
-        await this.assertNameAvailable(name);
+        await this.assertNameAvailable(name, organizationId);
         updates.name = name;
       }
     }
@@ -222,8 +239,8 @@ export class TeamsService {
     return this.toResponse(updated);
   }
 
-  async remove(id: string): Promise<void> {
-    const team = await this.getByIdOrFail(id);
+  async remove(id: string, organizationId: Types.ObjectId): Promise<void> {
+    const team = await this.getByIdOrFail(id, organizationId);
 
     // Route safety: customers assigned to the deleted team return to the
     // unassigned pool (visible to admins only) instead of pointing at a ghost.
@@ -243,9 +260,12 @@ export class TeamsService {
   // ── Helpers used by other modules ─────────────────────────────────────────
 
   /** Ids of active teams the given staff user belongs to. Used for row-level visibility. */
-  async getTeamIdsForMember(keycloakId: string): Promise<Types.ObjectId[]> {
+  async getTeamIdsForMember(
+    keycloakId: string,
+    organizationId: Types.ObjectId,
+  ): Promise<Types.ObjectId[]> {
     const teams = await this.teamModel
-      .find({ memberIds: keycloakId, isActive: true })
+      .find({ organizationId, memberIds: keycloakId, isActive: true })
       .select('_id')
       .exec();
     return teams.map((t) => t._id);
@@ -270,9 +290,15 @@ export class TeamsService {
 
   // ── Internal helpers ───────────────────────────────────────────────────────
 
-  private async assertNameAvailable(name: string): Promise<void> {
+  private async assertNameAvailable(
+    name: string,
+    organizationId: Types.ObjectId,
+  ): Promise<void> {
     const existing = await this.teamModel
-      .findOne({ name: { $regex: `^${escapeRegExp(name)}$`, $options: 'i' } })
+      .findOne({
+        organizationId,
+        name: { $regex: `^${escapeRegExp(name)}$`, $options: 'i' },
+      })
       .exec();
     if (existing) {
       throw new ConflictException('A team with this name already exists');
@@ -357,11 +383,16 @@ export class TeamsService {
     );
   }
 
-  private async getByIdOrFail(id: string): Promise<TeamDocument> {
+  private async getByIdOrFail(
+    id: string,
+    organizationId: Types.ObjectId,
+  ): Promise<TeamDocument> {
     if (!isValidObjectId(id)) {
       throw new NotFoundException(`Team with ID ${id} not found`);
     }
-    const team = await this.teamModel.findById(id).exec();
+    const team = await this.teamModel
+      .findOne({ _id: id, organizationId })
+      .exec();
     if (!team) {
       throw new NotFoundException(`Team with ID ${id} not found`);
     }

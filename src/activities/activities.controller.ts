@@ -11,6 +11,8 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
+import type { Types } from 'mongoose';
+import { CurrentOrg } from '../auth/decorators/current-org.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import type { KeycloakJwtPayload } from '../auth/interfaces/keycloak-jwt-payload.interface';
@@ -31,8 +33,9 @@ export class ActivitiesController {
   create(
     @Body() dto: CreateActivityDto,
     @CurrentUser() user: KeycloakJwtPayload,
+    @CurrentOrg() organizationId: Types.ObjectId,
   ) {
-    return this.activitiesService.create(dto, user.sub);
+    return this.activitiesService.create(dto, user.sub, organizationId);
   }
 
   /** Task list & unified timeline (filter by relatedType + relatedId). */
@@ -41,20 +44,28 @@ export class ActivitiesController {
   findAll(
     @Query() query: ActivityQueryDto,
     @CurrentUser() user: KeycloakJwtPayload,
+    @CurrentOrg() organizationId: Types.ObjectId,
   ) {
-    return this.activitiesService.findAll(query, user.sub);
+    return this.activitiesService.findAll(query, user.sub, organizationId);
   }
 
   @Get('stats')
   @Roles(AppRole.Admin, AppRole.Administrator, AppRole.User)
-  getStats(@CurrentUser() user: KeycloakJwtPayload) {
-    return this.activitiesService.getStats(user.sub);
+  getStats(
+    @CurrentUser() user: KeycloakJwtPayload,
+    @CurrentOrg() organizationId: Types.ObjectId,
+  ) {
+    return this.activitiesService.getStats(user.sub, organizationId);
   }
 
   @Get(':id')
   @Roles(AppRole.Admin, AppRole.Administrator, AppRole.User)
-  findOne(@Param('id') id: string, @CurrentUser() user: KeycloakJwtPayload) {
-    return this.activitiesService.findOne(id, user.sub);
+  findOne(
+    @Param('id') id: string,
+    @CurrentUser() user: KeycloakJwtPayload,
+    @CurrentOrg() organizationId: Types.ObjectId,
+  ) {
+    return this.activitiesService.findOne(id, user.sub, organizationId);
   }
 
   /** iCalendar export — importable into Outlook, Exchange, Google Calendar. */
@@ -62,8 +73,12 @@ export class ActivitiesController {
   @Roles(AppRole.Admin, AppRole.Administrator, AppRole.User)
   @Header('Content-Type', 'text/calendar; charset=utf-8')
   @Header('Content-Disposition', 'attachment; filename="activity.ics"')
-  getIcs(@Param('id') id: string, @CurrentUser() user: KeycloakJwtPayload) {
-    return this.activitiesService.getIcs(id, user.sub);
+  getIcs(
+    @Param('id') id: string,
+    @CurrentUser() user: KeycloakJwtPayload,
+    @CurrentOrg() organizationId: Types.ObjectId,
+  ) {
+    return this.activitiesService.getIcs(id, user.sub, organizationId);
   }
 
   @Patch(':id')
@@ -72,8 +87,9 @@ export class ActivitiesController {
     @Param('id') id: string,
     @Body() dto: UpdateActivityDto,
     @CurrentUser() user: KeycloakJwtPayload,
+    @CurrentOrg() organizationId: Types.ObjectId,
   ) {
-    return this.activitiesService.update(id, dto, user.sub);
+    return this.activitiesService.update(id, dto, user.sub, organizationId);
   }
 
   /** Complete, reopen, or cancel. */
@@ -83,21 +99,34 @@ export class ActivitiesController {
     @Param('id') id: string,
     @Body() dto: SetActivityStatusDto,
     @CurrentUser() user: KeycloakJwtPayload,
+    @CurrentOrg() organizationId: Types.ObjectId,
   ) {
-    return this.activitiesService.setStatus(id, dto, user.sub);
+    return this.activitiesService.setStatus(
+      id,
+      dto,
+      user.sub,
+      organizationId,
+    );
   }
 
   /** Reassign responsibility and/or team routing. */
   @Patch(':id/assign')
   @Roles(AppRole.Admin, AppRole.Administrator)
-  assign(@Param('id') id: string, @Body() dto: AssignActivityDto) {
-    return this.activitiesService.assign(id, dto);
+  assign(
+    @Param('id') id: string,
+    @Body() dto: AssignActivityDto,
+    @CurrentOrg() organizationId: Types.ObjectId,
+  ) {
+    return this.activitiesService.assign(id, dto, organizationId);
   }
 
   @Delete(':id')
   @Roles(AppRole.Admin, AppRole.Administrator)
   @HttpCode(HttpStatus.NO_CONTENT)
-  remove(@Param('id') id: string) {
-    return this.activitiesService.remove(id);
+  remove(
+    @Param('id') id: string,
+    @CurrentOrg() organizationId: Types.ObjectId,
+  ) {
+    return this.activitiesService.remove(id, organizationId);
   }
 }

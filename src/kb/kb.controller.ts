@@ -10,6 +10,8 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
+import type { Types } from 'mongoose';
+import { CurrentOrg } from '../auth/decorators/current-org.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Public } from '../auth/decorators/public.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -56,26 +58,33 @@ export class KbController {
   create(
     @Body() dto: CreateKbArticleDto,
     @CurrentUser() user: KeycloakJwtPayload,
+    @CurrentOrg() organizationId: Types.ObjectId,
   ) {
-    return this.kbService.create(dto, user.sub);
+    return this.kbService.create(dto, user.sub, organizationId);
   }
 
   @Get()
   @Roles(AppRole.Admin, AppRole.Administrator, AppRole.User)
-  findAll(@Query() query: KbQueryDto) {
-    return this.kbService.findAll(query);
+  findAll(
+    @Query() query: KbQueryDto,
+    @CurrentOrg() organizationId: Types.ObjectId,
+  ) {
+    return this.kbService.findAll(query, organizationId);
   }
 
   @Get('stats')
   @Roles(AppRole.Admin, AppRole.Administrator, AppRole.User)
-  getStats() {
-    return this.kbService.getStats();
+  getStats(@CurrentOrg() organizationId: Types.ObjectId) {
+    return this.kbService.getStats(organizationId);
   }
 
   @Get(':id')
   @Roles(AppRole.Admin, AppRole.Administrator, AppRole.User)
-  findOne(@Param('id') id: string) {
-    return this.kbService.findOne(id);
+  findOne(
+    @Param('id') id: string,
+    @CurrentOrg() organizationId: Types.ObjectId,
+  ) {
+    return this.kbService.findOne(id, organizationId);
   }
 
   @Patch(':id')
@@ -84,14 +93,18 @@ export class KbController {
     @Param('id') id: string,
     @Body() dto: UpdateKbArticleDto,
     @CurrentUser() user: KeycloakJwtPayload,
+    @CurrentOrg() organizationId: Types.ObjectId,
   ) {
-    return this.kbService.update(id, dto, user.sub);
+    return this.kbService.update(id, dto, user.sub, organizationId);
   }
 
   @Delete(':id')
   @Roles(AppRole.Admin, AppRole.Administrator)
   @HttpCode(HttpStatus.NO_CONTENT)
-  remove(@Param('id') id: string) {
-    return this.kbService.remove(id);
+  remove(
+    @Param('id') id: string,
+    @CurrentOrg() organizationId: Types.ObjectId,
+  ) {
+    return this.kbService.remove(id, organizationId);
   }
 }

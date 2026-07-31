@@ -49,6 +49,7 @@ export class ContactsService {
   async create(
     dto: CreateContactDto,
     createdBy: string,
+    organizationId: Types.ObjectId,
   ): Promise<ContactResponseDto> {
     const email = dto.email.trim().toLowerCase();
     await this.assertEmailAvailable(email);
@@ -71,6 +72,7 @@ export class ContactsService {
     );
 
     const contact = await this.contactModel.create({
+      organizationId,
       firstName: dto.firstName.trim(),
       lastName: dto.lastName.trim(),
       email,
@@ -112,12 +114,16 @@ export class ContactsService {
 
   // ── Read ────────────────────────────────────────────────────────────────
 
-  async findAll(query: ContactQueryDto, requesterKeycloakId: string) {
+  async findAll(
+    query: ContactQueryDto,
+    requesterKeycloakId: string,
+    organizationId: Types.ObjectId,
+  ) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 10;
     const skip = (page - 1) * limit;
 
-    const conditions: Record<string, unknown>[] = [];
+    const conditions: Record<string, unknown>[] = [{ organizationId }];
 
     if (query.search?.trim()) {
       const searchRegex = new RegExp(escapeRegExp(query.search.trim()), 'i');
@@ -144,7 +150,10 @@ export class ContactsService {
       conditions.push({ doNotContact: query.doNotContact === 'true' });
     }
 
-    const visibility = await this.buildVisibilityFilter(requesterKeycloakId);
+    const visibility = await this.buildVisibilityFilter(
+      requesterKeycloakId,
+      organizationId,
+    );
     if (visibility) conditions.push(visibility);
 
     const filter: Record<string, unknown> =
@@ -178,13 +187,21 @@ export class ContactsService {
     };
   }
 
-  async getStats(requesterKeycloakId: string): Promise<ContactStatsDto> {
+  async getStats(
+    requesterKeycloakId: string,
+    organizationId: Types.ObjectId,
+  ): Promise<ContactStatsDto> {
     const startOfMonth = new Date();
     startOfMonth.setDate(1);
     startOfMonth.setHours(0, 0, 0, 0);
 
-    const visibility =
-      (await this.buildVisibilityFilter(requesterKeycloakId)) ?? {};
+    const visibility = {
+      organizationId,
+      ...((await this.buildVisibilityFilter(
+        requesterKeycloakId,
+        organizationId,
+      )) ?? {}),
+    };
 
     const [total, withAccount, doNotContact, newThisMonth, interactionsAgg] =
       await Promise.all([
@@ -223,9 +240,10 @@ export class ContactsService {
   async findOne(
     id: string,
     requesterKeycloakId: string,
+    organizationId: Types.ObjectId,
   ): Promise<ContactResponseDto> {
-    const contact = await this.getByIdOrFail(id);
-    await this.assertCanView(contact, requesterKeycloakId);
+    const contact = await this.getByIdOrFail(id, organizationId);
+    await this.assertCanView(contact, requesterKeycloakId, organizationId);
     return this.mapOne(contact);
   }
 
@@ -235,9 +253,10 @@ export class ContactsService {
     id: string,
     dto: UpdateContactDto,
     requesterKeycloakId: string,
+    organizationId: Types.ObjectId,
   ): Promise<ContactResponseDto> {
-    const contact = await this.getByIdOrFail(id);
-    await this.assertCanView(contact, requesterKeycloakId);
+    const contact = await this.getByIdOrFail(id, organizationId);
+    await this.assertCanView(contact, requesterKeycloakId, organizationId);
 
     if (dto.email !== undefined) {
       const newEmail = dto.email.trim().toLowerCase();
@@ -314,9 +333,10 @@ export class ContactsService {
     id: string,
     dto: AddInteractionDto,
     requesterKeycloakId: string,
+    organizationId: Types.ObjectId,
   ): Promise<ContactResponseDto> {
-    const contact = await this.getByIdOrFail(id);
-    await this.assertCanView(contact, requesterKeycloakId);
+    const contact = await this.getByIdOrFail(id, organizationId);
+    await this.assertCanView(contact, requesterKeycloakId, organizationId);
 
     contact.interactions.push({
       type: dto.type,
@@ -336,8 +356,12 @@ export class ContactsService {
    * Record routing: set or clear the record owner and/or the assigned team.
    * Omitted fields are unchanged; null clears a field.
    */
-  async assign(id: string, dto: AssignContactDto): Promise<ContactResponseDto> {
-    const contact = await this.getByIdOrFail(id);
+  async assign(
+    id: string,
+    dto: AssignContactDto,
+    organizationId: Types.ObjectId,
+  ): Promise<ContactResponseDto> {
+    const contact = await this.getByIdOrFail(id, organizationId);
 
     const sets: Record<string, unknown> = {};
     const unsets: Record<string, ''> = {};
@@ -406,8 +430,8 @@ export class ContactsService {
     return this.mapOne(updated);
   }
 
-  async remove(id: string): Promise<void> {
-    const contact = await this.getByIdOrFail(id);
+  async remove(id: string, organizationId: Types.ObjectId): Promise<void> {
+    const contact = await this.getByIdOrFail(id, organizationId);
     await this.contactModel.deleteOne({ _id: contact._id }).exec();
     this.logger.log(`Contact deleted: ${id}`);
   }
@@ -422,6 +446,7 @@ export class ContactsService {
    */
   private async buildVisibilityFilter(
     keycloakId: string,
+    organizationId: Types.ObjectId,
   ): Promise<Record<string, unknown> | null> {
     const appUser = await this.usersService.findByKeycloakId(keycloakId);
     if (!appUser) {
@@ -435,7 +460,10 @@ export class ContactsService {
       return null;
     }
 
-    const teamIds = await this.teamsService.getTeamIdsForMember(keycloakId);
+    const teamIds = await this.teamsService.getTeamIdsForMember(
+      keycloakId,
+      organizationId,
+    );
     return {
       $or: [
         { assignedToId: keycloakId },
@@ -449,6 +477,7 @@ export class ContactsService {
   private async assertCanView(
     contact: ContactDocument,
     keycloakId: string,
+    organizationId: Types.ObjectId,
   ): Promise<void> {
     const appUser = await this.usersService.findByKeycloakId(keycloakId);
     if (!appUser) {
@@ -467,7 +496,10 @@ export class ContactsService {
       return;
     }
     if (contact.assignedTeamId) {
-      const teamIds = await this.teamsService.getTeamIdsForMember(keycloakId);
+      const teamIds = await this.teamsService.getTeamIdsForMember(
+        keycloakId,
+        organizationId,
+      );
       if (teamIds.some((teamId) => teamId.equals(contact.assignedTeamId))) {
         return;
       }
@@ -647,11 +679,16 @@ export class ContactsService {
   }
 
   /** Load a contact by id, rejecting malformed ids with a 404 instead of a Mongoose CastError (500). */
-  private async getByIdOrFail(id: string): Promise<ContactDocument> {
+  private async getByIdOrFail(
+    id: string,
+    organizationId: Types.ObjectId,
+  ): Promise<ContactDocument> {
     if (!isValidObjectId(id)) {
       throw new NotFoundException(`Contact with ID ${id} not found`);
     }
-    const contact = await this.contactModel.findById(id).exec();
+    const contact = await this.contactModel
+      .findOne({ _id: id, organizationId })
+      .exec();
     if (!contact) {
       throw new NotFoundException(`Contact with ID ${id} not found`);
     }
