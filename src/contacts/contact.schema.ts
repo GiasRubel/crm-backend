@@ -52,6 +52,9 @@ export const ContactInteractionSchema =
  */
 @Schema({ timestamps: true })
 export class Contact {
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Organization', required: true, index: true })
+  organizationId: Types.ObjectId;
+
   @Prop({ required: true, trim: true })
   firstName: string;
 

@@ -10,6 +10,8 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
+import type { Types } from 'mongoose';
+import { CurrentOrg } from '../auth/decorators/current-org.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import type { KeycloakJwtPayload } from '../auth/interfaces/keycloak-jwt-payload.interface';
@@ -30,8 +32,9 @@ export class ContactsController {
   create(
     @Body() dto: CreateContactDto,
     @CurrentUser() user: KeycloakJwtPayload,
+    @CurrentOrg() organizationId: Types.ObjectId,
   ) {
-    return this.contactsService.create(dto, user.sub);
+    return this.contactsService.create(dto, user.sub, organizationId);
   }
 
   @Get()
@@ -39,20 +42,28 @@ export class ContactsController {
   findAll(
     @Query() query: ContactQueryDto,
     @CurrentUser() user: KeycloakJwtPayload,
+    @CurrentOrg() organizationId: Types.ObjectId,
   ) {
-    return this.contactsService.findAll(query, user.sub);
+    return this.contactsService.findAll(query, user.sub, organizationId);
   }
 
   @Get('stats')
   @Roles(AppRole.Admin, AppRole.Administrator, AppRole.User)
-  getStats(@CurrentUser() user: KeycloakJwtPayload) {
-    return this.contactsService.getStats(user.sub);
+  getStats(
+    @CurrentUser() user: KeycloakJwtPayload,
+    @CurrentOrg() organizationId: Types.ObjectId,
+  ) {
+    return this.contactsService.getStats(user.sub, organizationId);
   }
 
   @Get(':id')
   @Roles(AppRole.Admin, AppRole.Administrator, AppRole.User)
-  findOne(@Param('id') id: string, @CurrentUser() user: KeycloakJwtPayload) {
-    return this.contactsService.findOne(id, user.sub);
+  findOne(
+    @Param('id') id: string,
+    @CurrentUser() user: KeycloakJwtPayload,
+    @CurrentOrg() organizationId: Types.ObjectId,
+  ) {
+    return this.contactsService.findOne(id, user.sub, organizationId);
   }
 
   @Patch(':id')
@@ -61,8 +72,9 @@ export class ContactsController {
     @Param('id') id: string,
     @Body() dto: UpdateContactDto,
     @CurrentUser() user: KeycloakJwtPayload,
+    @CurrentOrg() organizationId: Types.ObjectId,
   ) {
-    return this.contactsService.update(id, dto, user.sub);
+    return this.contactsService.update(id, dto, user.sub, organizationId);
   }
 
   /** Log a communication touchpoint (call/email/meeting/sms/note). */
@@ -72,21 +84,34 @@ export class ContactsController {
     @Param('id') id: string,
     @Body() dto: AddInteractionDto,
     @CurrentUser() user: KeycloakJwtPayload,
+    @CurrentOrg() organizationId: Types.ObjectId,
   ) {
-    return this.contactsService.addInteraction(id, dto, user.sub);
+    return this.contactsService.addInteraction(
+      id,
+      dto,
+      user.sub,
+      organizationId,
+    );
   }
 
   /** Record routing: set/clear the record owner and/or the assigned team. */
   @Patch(':id/assign')
   @Roles(AppRole.Admin, AppRole.Administrator)
-  assign(@Param('id') id: string, @Body() dto: AssignContactDto) {
-    return this.contactsService.assign(id, dto);
+  assign(
+    @Param('id') id: string,
+    @Body() dto: AssignContactDto,
+    @CurrentOrg() organizationId: Types.ObjectId,
+  ) {
+    return this.contactsService.assign(id, dto, organizationId);
   }
 
   @Delete(':id')
   @Roles(AppRole.Admin, AppRole.Administrator)
   @HttpCode(HttpStatus.NO_CONTENT)
-  remove(@Param('id') id: string) {
-    return this.contactsService.remove(id);
+  remove(
+    @Param('id') id: string,
+    @CurrentOrg() organizationId: Types.ObjectId,
+  ) {
+    return this.contactsService.remove(id, organizationId);
   }
 }

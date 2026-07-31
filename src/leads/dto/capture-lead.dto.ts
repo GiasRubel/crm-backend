@@ -14,6 +14,12 @@ import {
  * fields — anonymous callers must not influence internal data.
  */
 export class CaptureLeadDto {
+  /** Which organization's CRM this submission belongs to. */
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(100)
+  organizationSlug: string;
+
   @IsString()
   @IsNotEmpty()
   @MaxLength(100)

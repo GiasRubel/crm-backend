@@ -102,6 +102,9 @@ export const RuleActionSchema = SchemaFactory.createForClass(RuleAction);
 
 @Schema({ timestamps: true })
 export class AutomationRule {
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Organization', required: true, index: true })
+  organizationId: Types.ObjectId;
+
   @Prop({ required: true, trim: true })
   name: string;
 

@@ -124,10 +124,21 @@ export class KeycloakAdminService {
 
   /**
    * Send a "Set your password" invitation email via Keycloak.
+   *
+   * Without client_id/redirect_uri, Keycloak strands the user on its own
+   * generic "Your account has been updated" page with no way back into the
+   * app after they set their password.
    */
   async sendSetPasswordEmail(keycloakId: string): Promise<void> {
     const token = await this.getAdminToken();
-    const url = `${this.authServerUrl}/admin/realms/${this.realm}/users/${keycloakId}/execute-actions-email`;
+    const clientId = this.config.get<string>('KEYCLOAK_CLIENT_ID') ?? '';
+    const frontendUrl =
+      this.config.get<string>('FRONTEND_URL') ?? 'http://localhost:3001';
+    const params = new URLSearchParams({
+      client_id: clientId,
+      redirect_uri: `${frontendUrl}/dashboard`,
+    });
+    const url = `${this.authServerUrl}/admin/realms/${this.realm}/users/${keycloakId}/execute-actions-email?${params.toString()}`;
 
     const res = await fetch(url, {
       method: 'PUT',

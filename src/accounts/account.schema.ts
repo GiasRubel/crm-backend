@@ -35,6 +35,9 @@ export type AccountStatus = (typeof ACCOUNT_STATUSES)[number];
  */
 @Schema({ timestamps: true })
 export class Account {
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Organization', required: true, index: true })
+  organizationId: Types.ObjectId;
+
   /** Company name. Uniqueness (case-insensitive) enforced in the service. */
   @Prop({ required: true, trim: true, index: true })
   name: string;

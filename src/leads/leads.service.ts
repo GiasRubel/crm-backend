@@ -12,6 +12,7 @@ import { isValidObjectId, Model, Types } from 'mongoose';
 import { CustomersService } from '../customers/customers.service';
 import { CrmEventBus } from '../events/crm-event-bus.service';
 import { OpportunitiesService } from '../opportunities/opportunities.service';
+import { OrganizationsService } from '../organizations/organizations.service';
 import { TeamDocument } from '../teams/team.schema';
 import { TeamsService } from '../teams/teams.service';
 import { AppRole } from '../users/app-role.enum';
@@ -59,6 +60,7 @@ export class LeadsService {
     private readonly teamsService: TeamsService,
     private readonly customersService: CustomersService,
     private readonly opportunitiesService: OpportunitiesService,
+    private readonly organizationsService: OrganizationsService,
     private readonly eventBus: CrmEventBus,
   ) {}
 
@@ -82,9 +84,10 @@ export class LeadsService {
   async create(
     dto: CreateLeadDto,
     createdBy: string,
+    organizationId: Types.ObjectId,
   ): Promise<LeadResponseDto> {
     const email = dto.email.trim().toLowerCase();
-    await this.assertNoOpenLeadWithEmail(email);
+    await this.assertNoOpenLeadWithEmail(email, organizationId);
 
     const assignment = await this.resolveAssignmentTargets(
       dto.assignedToId,
@@ -92,6 +95,7 @@ export class LeadsService {
     );
 
     const lead = await this.leadModel.create({
+      organizationId,
       firstName: dto.firstName.trim(),
       lastName: dto.lastName.trim(),
       email,
@@ -125,6 +129,18 @@ export class LeadsService {
       return;
     }
 
+    const organization = await this.organizationsService.findDocBySlug(
+      dto.organizationSlug,
+    );
+    if (!organization) {
+      // Don't reveal which slugs are valid to an anonymous caller.
+      this.logger.warn(
+        `Lead capture referenced unknown organizationSlug "${dto.organizationSlug}" — submission discarded`,
+      );
+      return;
+    }
+    const organizationId = organization._id;
+
     const email = dto.email.trim().toLowerCase();
     const source = dto.source ?? 'web_form';
     const engagement: LeadEngagement = {
@@ -135,7 +151,7 @@ export class LeadsService {
     };
 
     const existing = await this.leadModel
-      .findOne({ email, status: { $in: OPEN_LEAD_STATUSES } })
+      .findOne({ organizationId, email, status: { $in: OPEN_LEAD_STATUSES } })
       .exec();
 
     if (existing) {
@@ -153,11 +169,15 @@ export class LeadsService {
     // Territory auto-routing: match the submitted region tag to a team.
     let assignedTeamId: Types.ObjectId | undefined;
     if (dto.region?.trim()) {
-      const { team } = await this.teamsService.matchRegion(dto.region);
+      const { team } = await this.teamsService.matchRegion(
+        dto.region,
+        organizationId,
+      );
       if (team) assignedTeamId = new Types.ObjectId(team.id);
     }
 
     const captured = await this.leadModel.create({
+      organizationId,
       firstName: dto.firstName.trim(),
       lastName: dto.lastName.trim(),
       email,
@@ -179,12 +199,16 @@ export class LeadsService {
 
   // ── Read ────────────────────────────────────────────────────────────────
 
-  async findAll(query: LeadQueryDto, requesterKeycloakId: string) {
+  async findAll(
+    query: LeadQueryDto,
+    requesterKeycloakId: string,
+    organizationId: Types.ObjectId,
+  ) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 10;
     const skip = (page - 1) * limit;
 
-    const conditions: Record<string, unknown>[] = [];
+    const conditions: Record<string, unknown>[] = [{ organizationId }];
 
     if (query.search?.trim()) {
       const searchRegex = new RegExp(escapeRegExp(query.search.trim()), 'i');
@@ -203,7 +227,10 @@ export class LeadsService {
     if (query.source) conditions.push({ source: query.source });
     if (query.rating) conditions.push({ score: this.scoreRange(query.rating) });
 
-    const visibility = await this.buildVisibilityFilter(requesterKeycloakId);
+    const visibility = await this.buildVisibilityFilter(
+      requesterKeycloakId,
+      organizationId,
+    );
     if (visibility) conditions.push(visibility);
 
     const filter: Record<string, unknown> =
@@ -237,13 +264,21 @@ export class LeadsService {
     };
   }
 
-  async getStats(requesterKeycloakId: string): Promise<LeadStatsDto> {
+  async getStats(
+    requesterKeycloakId: string,
+    organizationId: Types.ObjectId,
+  ): Promise<LeadStatsDto> {
     const startOfMonth = new Date();
     startOfMonth.setDate(1);
     startOfMonth.setHours(0, 0, 0, 0);
 
-    const visibility =
-      (await this.buildVisibilityFilter(requesterKeycloakId)) ?? {};
+    const visibility = {
+      organizationId,
+      ...((await this.buildVisibilityFilter(
+        requesterKeycloakId,
+        organizationId,
+      )) ?? {}),
+    };
 
     const [byStatus, total, hot, newThisMonth, convertedThisMonth, avg] =
       await Promise.all([
@@ -306,9 +341,10 @@ export class LeadsService {
   async findOne(
     id: string,
     requesterKeycloakId: string,
+    organizationId: Types.ObjectId,
   ): Promise<LeadResponseDto> {
-    const lead = await this.getByIdOrFail(id);
-    await this.assertCanView(lead, requesterKeycloakId);
+    const lead = await this.getByIdOrFail(id, organizationId);
+    await this.assertCanView(lead, requesterKeycloakId, organizationId);
     return this.mapOne(lead);
   }
 
@@ -318,9 +354,10 @@ export class LeadsService {
     id: string,
     dto: UpdateLeadDto,
     requesterKeycloakId: string,
+    organizationId: Types.ObjectId,
   ): Promise<LeadResponseDto> {
-    const lead = await this.getByIdOrFail(id);
-    await this.assertCanView(lead, requesterKeycloakId);
+    const lead = await this.getByIdOrFail(id, organizationId);
+    await this.assertCanView(lead, requesterKeycloakId, organizationId);
     this.assertNotConverted(lead);
 
     const previousStatus = lead.status;
@@ -328,7 +365,7 @@ export class LeadsService {
     if (dto.email !== undefined) {
       const newEmail = dto.email.trim().toLowerCase();
       if (newEmail !== lead.email) {
-        await this.assertNoOpenLeadWithEmail(newEmail, lead._id);
+        await this.assertNoOpenLeadWithEmail(newEmail, organizationId, lead._id);
         lead.email = newEmail;
       }
     }
@@ -364,9 +401,10 @@ export class LeadsService {
     id: string,
     dto: AddEngagementDto,
     requesterKeycloakId: string,
+    organizationId: Types.ObjectId,
   ): Promise<LeadResponseDto> {
-    const lead = await this.getByIdOrFail(id);
-    await this.assertCanView(lead, requesterKeycloakId);
+    const lead = await this.getByIdOrFail(id, organizationId);
+    await this.assertCanView(lead, requesterKeycloakId, organizationId);
     this.assertNotConverted(lead);
 
     const previousScore = lead.score;
@@ -408,8 +446,12 @@ export class LeadsService {
    * Record routing: set or clear the record owner and/or the assigned team.
    * Omitted fields are unchanged; null clears a field.
    */
-  async assign(id: string, dto: AssignLeadDto): Promise<LeadResponseDto> {
-    const lead = await this.getByIdOrFail(id);
+  async assign(
+    id: string,
+    dto: AssignLeadDto,
+    organizationId: Types.ObjectId,
+  ): Promise<LeadResponseDto> {
+    const lead = await this.getByIdOrFail(id, organizationId);
     this.assertNotConverted(lead);
 
     const sets: Record<string, unknown> = {};
@@ -489,9 +531,10 @@ export class LeadsService {
     id: string,
     dto: ConvertLeadDto,
     requesterKeycloakId: string,
+    organizationId: Types.ObjectId,
   ): Promise<LeadResponseDto> {
-    const lead = await this.getByIdOrFail(id);
-    await this.assertCanView(lead, requesterKeycloakId);
+    const lead = await this.getByIdOrFail(id, organizationId);
+    await this.assertCanView(lead, requesterKeycloakId, organizationId);
     this.assertNotConverted(lead);
 
     if (lead.status !== 'qualified') {
@@ -522,6 +565,7 @@ export class LeadsService {
         assignedTeamId: lead.assignedTeamId?.toString(),
       },
       requesterKeycloakId,
+      organizationId,
     );
 
     // 2. Opportunity (optional)
@@ -544,6 +588,7 @@ export class LeadsService {
             leadId: lead._id.toString(),
           },
           requesterKeycloakId,
+          organizationId,
         );
         opportunityId = opportunity.id;
       }
@@ -574,7 +619,7 @@ export class LeadsService {
 
       if (opportunityId) {
         try {
-          await this.opportunitiesService.remove(opportunityId);
+          await this.opportunitiesService.remove(opportunityId, organizationId);
         } catch (oppError) {
           this.logger.error(
             `Rollback failure: could not delete opportunity ${opportunityId}:`,
@@ -584,7 +629,7 @@ export class LeadsService {
       }
       try {
         // Removes the Keycloak account and both Mongo documents
-        await this.customersService.remove(customer.id);
+        await this.customersService.remove(customer.id, organizationId);
       } catch (custError) {
         this.logger.error(
           `Rollback critical failure: could not delete customer ${customer.id}:`,
@@ -602,8 +647,8 @@ export class LeadsService {
     }
   }
 
-  async remove(id: string): Promise<void> {
-    const lead = await this.getByIdOrFail(id);
+  async remove(id: string, organizationId: Types.ObjectId): Promise<void> {
+    const lead = await this.getByIdOrFail(id, organizationId);
     await this.leadModel.deleteOne({ _id: lead._id }).exec();
     this.logger.log(`Lead deleted: ${id}`);
   }
@@ -618,6 +663,7 @@ export class LeadsService {
    */
   private async buildVisibilityFilter(
     keycloakId: string,
+    organizationId: Types.ObjectId,
   ): Promise<Record<string, unknown> | null> {
     const appUser = await this.usersService.findByKeycloakId(keycloakId);
     if (!appUser) {
@@ -631,7 +677,10 @@ export class LeadsService {
       return null;
     }
 
-    const teamIds = await this.teamsService.getTeamIdsForMember(keycloakId);
+    const teamIds = await this.teamsService.getTeamIdsForMember(
+      keycloakId,
+      organizationId,
+    );
     return {
       $or: [
         { assignedToId: keycloakId },
@@ -645,6 +694,7 @@ export class LeadsService {
   private async assertCanView(
     lead: LeadDocument,
     keycloakId: string,
+    organizationId: Types.ObjectId,
   ): Promise<void> {
     const appUser = await this.usersService.findByKeycloakId(keycloakId);
     if (!appUser) {
@@ -660,7 +710,10 @@ export class LeadsService {
       return;
     }
     if (lead.assignedTeamId) {
-      const teamIds = await this.teamsService.getTeamIdsForMember(keycloakId);
+      const teamIds = await this.teamsService.getTeamIdsForMember(
+        keycloakId,
+        organizationId,
+      );
       if (teamIds.some((teamId) => teamId.equals(lead.assignedTeamId))) {
         return;
       }
@@ -682,10 +735,12 @@ export class LeadsService {
 
   private async assertNoOpenLeadWithEmail(
     email: string,
+    organizationId: Types.ObjectId,
     excludeId?: Types.ObjectId,
   ): Promise<void> {
     const existing = await this.leadModel
       .findOne({
+        organizationId,
         email,
         status: { $in: OPEN_LEAD_STATUSES },
         ...(excludeId ? { _id: { $ne: excludeId } } : {}),
@@ -804,11 +859,16 @@ export class LeadsService {
   }
 
   /** Load a lead by id, rejecting malformed ids with a 404 instead of a Mongoose CastError (500). */
-  private async getByIdOrFail(id: string): Promise<LeadDocument> {
+  private async getByIdOrFail(
+    id: string,
+    organizationId: Types.ObjectId,
+  ): Promise<LeadDocument> {
     if (!isValidObjectId(id)) {
       throw new NotFoundException(`Lead with ID ${id} not found`);
     }
-    const lead = await this.leadModel.findById(id).exec();
+    const lead = await this.leadModel
+      .findOne({ _id: id, organizationId })
+      .exec();
     if (!lead) {
       throw new NotFoundException(`Lead with ID ${id} not found`);
     }

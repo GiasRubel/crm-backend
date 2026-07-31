@@ -10,6 +10,8 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
+import type { Types } from 'mongoose';
+import { CurrentOrg } from '../auth/decorators/current-org.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import type { KeycloakJwtPayload } from '../auth/interfaces/keycloak-jwt-payload.interface';
@@ -29,39 +31,56 @@ export class AutomationsController {
   create(
     @Body() dto: CreateAutomationRuleDto,
     @CurrentUser() user: KeycloakJwtPayload,
+    @CurrentOrg() organizationId: Types.ObjectId,
   ) {
-    return this.automationsService.create(dto, user.sub);
+    return this.automationsService.create(dto, user.sub, organizationId);
   }
 
   @Get()
-  findAll(@Query() query: RuleQueryDto) {
-    return this.automationsService.findAll(query);
+  findAll(
+    @Query() query: RuleQueryDto,
+    @CurrentOrg() organizationId: Types.ObjectId,
+  ) {
+    return this.automationsService.findAll(query, organizationId);
   }
 
   @Get('stats')
-  getStats() {
-    return this.automationsService.getStats();
+  getStats(@CurrentOrg() organizationId: Types.ObjectId) {
+    return this.automationsService.getStats(organizationId);
   }
 
   /** Execution log (filter by ruleId / status). */
   @Get('runs')
-  findRuns(@Query() query: RunQueryDto) {
-    return this.automationsService.findRuns(query);
+  findRuns(
+    @Query() query: RunQueryDto,
+    @CurrentOrg() organizationId: Types.ObjectId,
+  ) {
+    return this.automationsService.findRuns(query, organizationId);
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.automationsService.findOne(id);
+  findOne(
+    @Param('id') id: string,
+    @CurrentOrg() organizationId: Types.ObjectId,
+  ) {
+    return this.automationsService.findOne(id, organizationId);
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateAutomationRuleDto) {
-    return this.automationsService.update(id, dto);
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateAutomationRuleDto,
+    @CurrentOrg() organizationId: Types.ObjectId,
+  ) {
+    return this.automationsService.update(id, dto, organizationId);
   }
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  remove(@Param('id') id: string) {
-    return this.automationsService.remove(id);
+  remove(
+    @Param('id') id: string,
+    @CurrentOrg() organizationId: Types.ObjectId,
+  ) {
+    return this.automationsService.remove(id, organizationId);
   }
 }

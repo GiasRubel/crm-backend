@@ -1,8 +1,11 @@
-import { Controller, Get } from '@nestjs/common';
+import { Body, Controller, Get, Post } from '@nestjs/common';
+import { CurrentOrg } from '../auth/decorators/current-org.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import type { KeycloakJwtPayload } from '../auth/interfaces/keycloak-jwt-payload.interface';
+import { Types } from 'mongoose';
 import { AppRole } from './app-role.enum';
+import { CreateStaffDto } from './dto/create-staff.dto';
 import { StaffUserResponseDto } from './dto/staff-user-response.dto';
 import { UserResponseDto } from './dto/user-response.dto';
 import { toStaffUserResponseDto } from './mappers/user.mapper';
@@ -23,5 +26,15 @@ export class UsersController {
   async getStaff(): Promise<StaffUserResponseDto[]> {
     const staff = await this.usersService.findAllStaff();
     return staff.map(toStaffUserResponseDto);
+  }
+
+  /** Admin-invited teammate — the only way to add staff besides the standalone first-login bootstrap. */
+  @Post()
+  @Roles(AppRole.Admin, AppRole.Administrator)
+  createStaff(
+    @Body() dto: CreateStaffDto,
+    @CurrentOrg() organizationId: Types.ObjectId,
+  ): Promise<StaffUserResponseDto> {
+    return this.usersService.createStaff(dto, organizationId);
   }
 }

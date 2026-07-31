@@ -76,6 +76,7 @@ export class OpportunitiesService {
   async create(
     dto: CreateOpportunityDto,
     createdBy: string,
+    organizationId: Types.ObjectId,
   ): Promise<OpportunityResponseDto> {
     const customer = await this.customersService.findDocById(dto.customerId);
     if (!customer) {
@@ -99,6 +100,7 @@ export class OpportunitiesService {
     const stage = dto.stage ?? 'discovery';
 
     const opportunity = await this.opportunityModel.create({
+      organizationId,
       name: dto.name.trim(),
       customerId: customer._id,
       leadId: dto.leadId ? new Types.ObjectId(dto.leadId) : undefined,
@@ -123,12 +125,16 @@ export class OpportunitiesService {
 
   // ── Read ────────────────────────────────────────────────────────────────
 
-  async findAll(query: OpportunityQueryDto, requesterKeycloakId: string) {
+  async findAll(
+    query: OpportunityQueryDto,
+    requesterKeycloakId: string,
+    organizationId: Types.ObjectId,
+  ) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 10;
     const skip = (page - 1) * limit;
 
-    const conditions: Record<string, unknown>[] = [];
+    const conditions: Record<string, unknown>[] = [{ organizationId }];
 
     if (query.search?.trim()) {
       const searchRegex = new RegExp(escapeRegExp(query.search.trim()), 'i');
@@ -142,7 +148,10 @@ export class OpportunitiesService {
       conditions.push({ accountId: new Types.ObjectId(query.accountId) });
     }
 
-    const visibility = await this.buildVisibilityFilter(requesterKeycloakId);
+    const visibility = await this.buildVisibilityFilter(
+      requesterKeycloakId,
+      organizationId,
+    );
     if (visibility) conditions.push(visibility);
 
     const filter: Record<string, unknown> =
@@ -186,9 +195,17 @@ export class OpportunitiesService {
    * totals. Columns are capped at BOARD_COLUMN_LIMIT cards (most recently
    * updated first); `count`/`totalAmount` always reflect the full column.
    */
-  async getBoard(requesterKeycloakId: string) {
-    const visibility =
-      (await this.buildVisibilityFilter(requesterKeycloakId)) ?? {};
+  async getBoard(
+    requesterKeycloakId: string,
+    organizationId: Types.ObjectId,
+  ) {
+    const visibility = {
+      organizationId,
+      ...((await this.buildVisibilityFilter(
+        requesterKeycloakId,
+        organizationId,
+      )) ?? {}),
+    };
 
     const columns = await Promise.all(
       OPPORTUNITY_STAGES.map(async (stage) => {
@@ -223,13 +240,21 @@ export class OpportunitiesService {
     return { columns };
   }
 
-  async getStats(requesterKeycloakId: string): Promise<OpportunityStatsDto> {
+  async getStats(
+    requesterKeycloakId: string,
+    organizationId: Types.ObjectId,
+  ): Promise<OpportunityStatsDto> {
     const startOfMonth = new Date();
     startOfMonth.setDate(1);
     startOfMonth.setHours(0, 0, 0, 0);
 
-    const visibility =
-      (await this.buildVisibilityFilter(requesterKeycloakId)) ?? {};
+    const visibility = {
+      organizationId,
+      ...((await this.buildVisibilityFilter(
+        requesterKeycloakId,
+        organizationId,
+      )) ?? {}),
+    };
 
     const [byStage, weighted, wonThisMonth] = await Promise.all([
       this.opportunityModel
@@ -308,9 +333,10 @@ export class OpportunitiesService {
   async findOne(
     id: string,
     requesterKeycloakId: string,
+    organizationId: Types.ObjectId,
   ): Promise<OpportunityResponseDto> {
-    const opportunity = await this.getByIdOrFail(id);
-    await this.assertCanView(opportunity, requesterKeycloakId);
+    const opportunity = await this.getByIdOrFail(id, organizationId);
+    await this.assertCanView(opportunity, requesterKeycloakId, organizationId);
     return this.mapOne(opportunity);
   }
 
@@ -320,9 +346,10 @@ export class OpportunitiesService {
     id: string,
     dto: UpdateOpportunityDto,
     requesterKeycloakId: string,
+    organizationId: Types.ObjectId,
   ): Promise<OpportunityResponseDto> {
-    const opportunity = await this.getByIdOrFail(id);
-    await this.assertCanView(opportunity, requesterKeycloakId);
+    const opportunity = await this.getByIdOrFail(id, organizationId);
+    await this.assertCanView(opportunity, requesterKeycloakId, organizationId);
 
     if (dto.name !== undefined) opportunity.name = dto.name.trim();
     if (dto.amount !== undefined) opportunity.amount = dto.amount;
@@ -363,9 +390,10 @@ export class OpportunitiesService {
     id: string,
     dto: MoveStageDto,
     requesterKeycloakId: string,
+    organizationId: Types.ObjectId,
   ): Promise<OpportunityResponseDto> {
-    const opportunity = await this.getByIdOrFail(id);
-    await this.assertCanView(opportunity, requesterKeycloakId);
+    const opportunity = await this.getByIdOrFail(id, organizationId);
+    await this.assertCanView(opportunity, requesterKeycloakId, organizationId);
 
     const from = opportunity.stage;
     const to = dto.stage;
@@ -415,8 +443,9 @@ export class OpportunitiesService {
   async assign(
     id: string,
     dto: AssignOpportunityDto,
+    organizationId: Types.ObjectId,
   ): Promise<OpportunityResponseDto> {
-    const opportunity = await this.getByIdOrFail(id);
+    const opportunity = await this.getByIdOrFail(id, organizationId);
 
     const sets: Record<string, unknown> = {};
     const unsets: Record<string, ''> = {};
@@ -485,8 +514,8 @@ export class OpportunitiesService {
     return this.mapOne(updated);
   }
 
-  async remove(id: string): Promise<void> {
-    const opportunity = await this.getByIdOrFail(id);
+  async remove(id: string, organizationId: Types.ObjectId): Promise<void> {
+    const opportunity = await this.getByIdOrFail(id, organizationId);
     await this.opportunityModel.deleteOne({ _id: opportunity._id }).exec();
     this.logger.log(`Opportunity deleted: ${id}`);
   }
@@ -501,6 +530,7 @@ export class OpportunitiesService {
    */
   private async buildVisibilityFilter(
     keycloakId: string,
+    organizationId: Types.ObjectId,
   ): Promise<Record<string, unknown> | null> {
     const appUser = await this.usersService.findByKeycloakId(keycloakId);
     if (!appUser) {
@@ -514,7 +544,10 @@ export class OpportunitiesService {
       return null;
     }
 
-    const teamIds = await this.teamsService.getTeamIdsForMember(keycloakId);
+    const teamIds = await this.teamsService.getTeamIdsForMember(
+      keycloakId,
+      organizationId,
+    );
     return {
       $or: [
         { assignedToId: keycloakId },
@@ -528,6 +561,7 @@ export class OpportunitiesService {
   private async assertCanView(
     opportunity: OpportunityDocument,
     keycloakId: string,
+    organizationId: Types.ObjectId,
   ): Promise<void> {
     const appUser = await this.usersService.findByKeycloakId(keycloakId);
     if (!appUser) {
@@ -546,7 +580,10 @@ export class OpportunitiesService {
       return;
     }
     if (opportunity.assignedTeamId) {
-      const teamIds = await this.teamsService.getTeamIdsForMember(keycloakId);
+      const teamIds = await this.teamsService.getTeamIdsForMember(
+        keycloakId,
+        organizationId,
+      );
       if (teamIds.some((teamId) => teamId.equals(opportunity.assignedTeamId))) {
         return;
       }
@@ -677,11 +714,16 @@ export class OpportunitiesService {
   }
 
   /** Load an opportunity by id, rejecting malformed ids with a 404 instead of a Mongoose CastError (500). */
-  private async getByIdOrFail(id: string): Promise<OpportunityDocument> {
+  private async getByIdOrFail(
+    id: string,
+    organizationId: Types.ObjectId,
+  ): Promise<OpportunityDocument> {
     if (!isValidObjectId(id)) {
       throw new NotFoundException(`Opportunity with ID ${id} not found`);
     }
-    const opportunity = await this.opportunityModel.findById(id).exec();
+    const opportunity = await this.opportunityModel
+      .findOne({ _id: id, organizationId })
+      .exec();
     if (!opportunity) {
       throw new NotFoundException(`Opportunity with ID ${id} not found`);
     }

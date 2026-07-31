@@ -60,6 +60,7 @@ export class TicketsService {
   async create(
     dto: CreateTicketDto,
     createdBy: string,
+    organizationId: Types.ObjectId,
   ): Promise<TicketResponseDto> {
     const customer = await this.customersService.findDocById(dto.customerId);
     if (!customer) {
@@ -72,6 +73,7 @@ export class TicketsService {
     );
 
     const ticket = await this.ticketModel.create({
+      organizationId,
       number: await this.nextTicketNumber(),
       subject: dto.subject.trim(),
       description: dto.description.trim(),
@@ -87,12 +89,16 @@ export class TicketsService {
     return this.mapOne(ticket);
   }
 
-  async findAll(query: TicketQueryDto, requesterKeycloakId: string) {
+  async findAll(
+    query: TicketQueryDto,
+    requesterKeycloakId: string,
+    organizationId: Types.ObjectId,
+  ) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 10;
     const skip = (page - 1) * limit;
 
-    const conditions: Record<string, unknown>[] = [];
+    const conditions: Record<string, unknown>[] = [{ organizationId }];
 
     if (query.search?.trim()) {
       const searchRegex = new RegExp(escapeRegExp(query.search.trim()), 'i');
@@ -116,7 +122,10 @@ export class TicketsService {
     if (query.unassigned === 'true')
       conditions.push({ assignedToId: { $exists: false } });
 
-    const visibility = await this.buildVisibilityFilter(requesterKeycloakId);
+    const visibility = await this.buildVisibilityFilter(
+      requesterKeycloakId,
+      organizationId,
+    );
     if (visibility) conditions.push(visibility);
 
     const filter: Record<string, unknown> =
@@ -150,13 +159,21 @@ export class TicketsService {
     };
   }
 
-  async getStats(requesterKeycloakId: string): Promise<TicketStatsDto> {
+  async getStats(
+    requesterKeycloakId: string,
+    organizationId: Types.ObjectId,
+  ): Promise<TicketStatsDto> {
     const startOfMonth = new Date();
     startOfMonth.setDate(1);
     startOfMonth.setHours(0, 0, 0, 0);
 
-    const visibility =
-      (await this.buildVisibilityFilter(requesterKeycloakId)) ?? {};
+    const visibility = {
+      organizationId,
+      ...((await this.buildVisibilityFilter(
+        requesterKeycloakId,
+        organizationId,
+      )) ?? {}),
+    };
 
     const [
       byStatus,
@@ -243,9 +260,10 @@ export class TicketsService {
   async findOne(
     id: string,
     requesterKeycloakId: string,
+    organizationId: Types.ObjectId,
   ): Promise<TicketResponseDto> {
-    const ticket = await this.getByIdOrFail(id);
-    await this.assertCanView(ticket, requesterKeycloakId);
+    const ticket = await this.getByIdOrFail(id, organizationId);
+    await this.assertCanView(ticket, requesterKeycloakId, organizationId);
     return this.mapOne(ticket);
   }
 
@@ -255,9 +273,10 @@ export class TicketsService {
     id: string,
     dto: UpdateTicketDto,
     requesterKeycloakId: string,
+    organizationId: Types.ObjectId,
   ): Promise<TicketResponseDto> {
-    const ticket = await this.getByIdOrFail(id);
-    await this.assertCanView(ticket, requesterKeycloakId);
+    const ticket = await this.getByIdOrFail(id, organizationId);
+    await this.assertCanView(ticket, requesterKeycloakId, organizationId);
 
     if (dto.subject !== undefined) ticket.subject = dto.subject.trim();
     if (dto.description !== undefined)
@@ -288,9 +307,10 @@ export class TicketsService {
     id: string,
     dto: SetTicketStatusDto,
     requesterKeycloakId: string,
+    organizationId: Types.ObjectId,
   ): Promise<TicketResponseDto> {
-    const ticket = await this.getByIdOrFail(id);
-    await this.assertCanView(ticket, requesterKeycloakId);
+    const ticket = await this.getByIdOrFail(id, organizationId);
+    await this.assertCanView(ticket, requesterKeycloakId, organizationId);
     if (ticket.status === dto.status) return this.mapOne(ticket);
 
     this.applyStatus(ticket, dto.status);
@@ -305,9 +325,10 @@ export class TicketsService {
     id: string,
     dto: AddTicketCommentDto,
     requesterKeycloakId: string,
+    organizationId: Types.ObjectId,
   ): Promise<TicketResponseDto> {
-    const ticket = await this.getByIdOrFail(id);
-    await this.assertCanView(ticket, requesterKeycloakId);
+    const ticket = await this.getByIdOrFail(id, organizationId);
+    await this.assertCanView(ticket, requesterKeycloakId, organizationId);
     if (ticket.status === 'closed') {
       throw new BadRequestException(
         'This ticket is closed — reopen it to continue the conversation',
@@ -337,8 +358,12 @@ export class TicketsService {
    * Record routing: set or clear the ticket owner and/or the assigned team.
    * Omitted fields are unchanged; null clears a field.
    */
-  async assign(id: string, dto: AssignTicketDto): Promise<TicketResponseDto> {
-    const ticket = await this.getByIdOrFail(id);
+  async assign(
+    id: string,
+    dto: AssignTicketDto,
+    organizationId: Types.ObjectId,
+  ): Promise<TicketResponseDto> {
+    const ticket = await this.getByIdOrFail(id, organizationId);
 
     const sets: Record<string, unknown> = {};
     const unsets: Record<string, ''> = {};
@@ -406,8 +431,8 @@ export class TicketsService {
     return this.mapOne(updated);
   }
 
-  async remove(id: string): Promise<void> {
-    const ticket = await this.getByIdOrFail(id);
+  async remove(id: string, organizationId: Types.ObjectId): Promise<void> {
+    const ticket = await this.getByIdOrFail(id, organizationId);
     await this.ticketModel.deleteOne({ _id: ticket._id }).exec();
     this.logger.log(`Ticket deleted: ${ticket.number}`);
   }
@@ -422,6 +447,7 @@ export class TicketsService {
     const customer = await this.getPortalCustomerOrFail(customerKeycloakId);
 
     const ticket = await this.ticketModel.create({
+      organizationId: customer.organizationId,
       number: await this.nextTicketNumber(),
       subject: dto.subject.trim(),
       description: dto.description.trim(),
@@ -447,7 +473,10 @@ export class TicketsService {
   async findMy(customerKeycloakId: string): Promise<TicketResponseDto[]> {
     const customer = await this.getPortalCustomerOrFail(customerKeycloakId);
     const tickets = await this.ticketModel
-      .find({ customerId: customer._id })
+      .find({
+        organizationId: customer.organizationId,
+        customerId: customer._id,
+      })
       .sort({ updatedAt: -1, _id: -1 })
       .limit(100)
       .exec();
@@ -535,6 +564,7 @@ export class TicketsService {
 
   private async buildVisibilityFilter(
     keycloakId: string,
+    organizationId: Types.ObjectId,
   ): Promise<Record<string, unknown> | null> {
     const appUser = await this.usersService.findByKeycloakId(keycloakId);
     if (!appUser) {
@@ -548,7 +578,10 @@ export class TicketsService {
       return null;
     }
 
-    const teamIds = await this.teamsService.getTeamIdsForMember(keycloakId);
+    const teamIds = await this.teamsService.getTeamIdsForMember(
+      keycloakId,
+      organizationId,
+    );
     return {
       $or: [
         { assignedToId: keycloakId },
@@ -564,6 +597,7 @@ export class TicketsService {
   private async assertCanView(
     ticket: TicketDocument,
     keycloakId: string,
+    organizationId: Types.ObjectId,
   ): Promise<void> {
     const appUser = await this.usersService.findByKeycloakId(keycloakId);
     if (!appUser) {
@@ -583,7 +617,10 @@ export class TicketsService {
       return;
     }
     if (ticket.assignedTeamId) {
-      const teamIds = await this.teamsService.getTeamIdsForMember(keycloakId);
+      const teamIds = await this.teamsService.getTeamIdsForMember(
+        keycloakId,
+        organizationId,
+      );
       if (teamIds.some((teamId) => teamId.equals(ticket.assignedTeamId))) {
         return;
       }
@@ -620,7 +657,7 @@ export class TicketsService {
 
   private async getOwnTicketOrFail(id: string, customerKeycloakId: string) {
     const customer = await this.getPortalCustomerOrFail(customerKeycloakId);
-    const ticket = await this.getByIdOrFail(id);
+    const ticket = await this.getByIdOrFail(id, customer.organizationId);
     if (!ticket.customerId.equals(customer._id)) {
       throw new NotFoundException(`Ticket with ID ${id} not found`);
     }
@@ -749,11 +786,16 @@ export class TicketsService {
   }
 
   /** Load a ticket by id, rejecting malformed ids with a 404 instead of a Mongoose CastError (500). */
-  private async getByIdOrFail(id: string): Promise<TicketDocument> {
+  private async getByIdOrFail(
+    id: string,
+    organizationId: Types.ObjectId,
+  ): Promise<TicketDocument> {
     if (!isValidObjectId(id)) {
       throw new NotFoundException(`Ticket with ID ${id} not found`);
     }
-    const ticket = await this.ticketModel.findById(id).exec();
+    const ticket = await this.ticketModel
+      .findOne({ _id: id, organizationId })
+      .exec();
     if (!ticket) {
       throw new NotFoundException(`Ticket with ID ${id} not found`);
     }

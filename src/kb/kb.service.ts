@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { isValidObjectId, Model } from 'mongoose';
+import type { Types } from 'mongoose';
 import { UsersService } from '../users/users.service';
 import { CreateKbArticleDto } from './dto/create-kb-article.dto';
 import { KbFeedbackDto } from './dto/kb-feedback.dto';
@@ -54,11 +55,13 @@ export class KbService {
   async create(
     dto: CreateKbArticleDto,
     authorId: string,
+    organizationId: Types.ObjectId,
   ): Promise<KbArticleResponseDto> {
     const slug = await this.uniqueSlug(slugify(dto.title));
     const status = dto.status ?? 'draft';
 
     const article = await this.articleModel.create({
+      organizationId,
       title: dto.title.trim(),
       slug,
       body: dto.body,
@@ -74,12 +77,12 @@ export class KbService {
     return this.mapOne(article);
   }
 
-  async findAll(query: KbQueryDto) {
+  async findAll(query: KbQueryDto, organizationId: Types.ObjectId) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 10;
     const skip = (page - 1) * limit;
 
-    const conditions: Record<string, unknown>[] = [];
+    const conditions: Record<string, unknown>[] = [{ organizationId }];
 
     if (query.search?.trim()) {
       const searchRegex = new RegExp(escapeRegExp(query.search.trim()), 'i');
@@ -127,22 +130,32 @@ export class KbService {
     };
   }
 
-  async getStats(): Promise<KbStatsDto> {
+  async getStats(organizationId: Types.ObjectId): Promise<KbStatsDto> {
     const [byStatus, publicArticles, viewsAgg] = await Promise.all([
       this.articleModel
         .aggregate<{
           _id: string;
           count: number;
-        }>([{ $group: { _id: '$status', count: { $sum: 1 } } }])
+        }>([
+          { $match: { organizationId } },
+          { $group: { _id: '$status', count: { $sum: 1 } } },
+        ])
         .exec(),
       this.articleModel
-        .countDocuments({ visibility: 'public', status: 'published' })
+        .countDocuments({
+          organizationId,
+          visibility: 'public',
+          status: 'published',
+        })
         .exec(),
       this.articleModel
         .aggregate<{
           _id: null;
           total: number;
-        }>([{ $group: { _id: null, total: { $sum: '$views' } } }])
+        }>([
+          { $match: { organizationId } },
+          { $group: { _id: null, total: { $sum: '$views' } } },
+        ])
         .exec(),
     ]);
 
@@ -159,16 +172,20 @@ export class KbService {
     };
   }
 
-  async findOne(id: string): Promise<KbArticleResponseDto> {
-    return this.mapOne(await this.getByIdOrFail(id));
+  async findOne(
+    id: string,
+    organizationId: Types.ObjectId,
+  ): Promise<KbArticleResponseDto> {
+    return this.mapOne(await this.getByIdOrFail(id, organizationId));
   }
 
   async update(
     id: string,
     dto: UpdateKbArticleDto,
     editorId: string,
+    organizationId: Types.ObjectId,
   ): Promise<KbArticleResponseDto> {
-    const article = await this.getByIdOrFail(id);
+    const article = await this.getByIdOrFail(id, organizationId);
 
     if (dto.title !== undefined) article.title = dto.title.trim();
     if (dto.body !== undefined) article.body = dto.body;
@@ -188,8 +205,8 @@ export class KbService {
     return this.mapOne(article);
   }
 
-  async remove(id: string): Promise<void> {
-    const article = await this.getByIdOrFail(id);
+  async remove(id: string, organizationId: Types.ObjectId): Promise<void> {
+    const article = await this.getByIdOrFail(id, organizationId);
     await this.articleModel.deleteOne({ _id: article._id }).exec();
     this.logger.log(`KB article deleted: ${id} ("${article.title}")`);
   }
@@ -369,11 +386,16 @@ export class KbService {
   }
 
   /** Load an article by id, rejecting malformed ids with a 404 instead of a Mongoose CastError (500). */
-  private async getByIdOrFail(id: string): Promise<KbArticleDocument> {
+  private async getByIdOrFail(
+    id: string,
+    organizationId: Types.ObjectId,
+  ): Promise<KbArticleDocument> {
     if (!isValidObjectId(id)) {
       throw new NotFoundException(`Article with ID ${id} not found`);
     }
-    const article = await this.articleModel.findById(id).exec();
+    const article = await this.articleModel
+      .findOne({ _id: id, organizationId })
+      .exec();
     if (!article) {
       throw new NotFoundException(`Article with ID ${id} not found`);
     }

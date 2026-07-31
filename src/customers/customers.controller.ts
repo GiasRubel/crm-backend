@@ -10,6 +10,8 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
+import type { Types } from 'mongoose';
+import { CurrentOrg } from '../auth/decorators/current-org.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import type { KeycloakJwtPayload } from '../auth/interfaces/keycloak-jwt-payload.interface';
@@ -29,8 +31,9 @@ export class CustomersController {
   create(
     @Body() dto: CreateCustomerDto,
     @CurrentUser() user: KeycloakJwtPayload,
+    @CurrentOrg() organizationId: Types.ObjectId,
   ) {
-    return this.customersService.create(dto, user.sub);
+    return this.customersService.create(dto, user.sub, organizationId);
   }
 
   @Get()
@@ -38,14 +41,18 @@ export class CustomersController {
   findAll(
     @Query() query: CustomerQueryDto,
     @CurrentUser() user: KeycloakJwtPayload,
+    @CurrentOrg() organizationId: Types.ObjectId,
   ) {
-    return this.customersService.findAll(query, user.sub);
+    return this.customersService.findAll(query, user.sub, organizationId);
   }
 
   @Get('stats')
   @Roles(AppRole.Admin, AppRole.Administrator, AppRole.User)
-  getStats(@CurrentUser() user: KeycloakJwtPayload) {
-    return this.customersService.getStats(user.sub);
+  getStats(
+    @CurrentUser() user: KeycloakJwtPayload,
+    @CurrentOrg() organizationId: Types.ObjectId,
+  ) {
+    return this.customersService.getStats(user.sub, organizationId);
   }
 
   /** Self-service profile for a signed-in customer (customer portal). */
@@ -57,34 +64,52 @@ export class CustomersController {
 
   @Get(':id')
   @Roles(AppRole.Admin, AppRole.Administrator, AppRole.User)
-  findOne(@Param('id') id: string, @CurrentUser() user: KeycloakJwtPayload) {
-    return this.customersService.findOne(id, user.sub);
+  findOne(
+    @Param('id') id: string,
+    @CurrentUser() user: KeycloakJwtPayload,
+    @CurrentOrg() organizationId: Types.ObjectId,
+  ) {
+    return this.customersService.findOne(id, user.sub, organizationId);
   }
 
   @Patch(':id')
   @Roles(AppRole.Admin, AppRole.Administrator)
-  update(@Param('id') id: string, @Body() dto: UpdateCustomerDto) {
-    return this.customersService.update(id, dto);
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateCustomerDto,
+    @CurrentOrg() organizationId: Types.ObjectId,
+  ) {
+    return this.customersService.update(id, dto, organizationId);
   }
 
   /** Record routing: set/clear the record owner and/or the assigned team. */
   @Patch(':id/assign')
   @Roles(AppRole.Admin, AppRole.Administrator)
-  assign(@Param('id') id: string, @Body() dto: AssignCustomerDto) {
-    return this.customersService.assign(id, dto);
+  assign(
+    @Param('id') id: string,
+    @Body() dto: AssignCustomerDto,
+    @CurrentOrg() organizationId: Types.ObjectId,
+  ) {
+    return this.customersService.assign(id, dto, organizationId);
   }
 
   @Delete(':id')
   @Roles(AppRole.Admin, AppRole.Administrator)
   @HttpCode(HttpStatus.NO_CONTENT)
-  remove(@Param('id') id: string) {
-    return this.customersService.remove(id);
+  remove(
+    @Param('id') id: string,
+    @CurrentOrg() organizationId: Types.ObjectId,
+  ) {
+    return this.customersService.remove(id, organizationId);
   }
 
   @Post(':id/resend')
   @Roles(AppRole.Admin, AppRole.Administrator)
   @HttpCode(HttpStatus.OK)
-  resendInvitation(@Param('id') id: string) {
-    return this.customersService.resendInvitation(id);
+  resendInvitation(
+    @Param('id') id: string,
+    @CurrentOrg() organizationId: Types.ObjectId,
+  ) {
+    return this.customersService.resendInvitation(id, organizationId);
   }
 }

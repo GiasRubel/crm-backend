@@ -10,6 +10,8 @@ import {
   Put,
   Query,
 } from '@nestjs/common';
+import type { Types } from 'mongoose';
+import { CurrentOrg } from '../auth/decorators/current-org.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import type { KeycloakJwtPayload } from '../auth/interfaces/keycloak-jwt-payload.interface';
@@ -35,31 +37,44 @@ export class ReportsController {
   /** Consolidated analytics overview (pipeline, funnel, revenue, reps). */
   @Get('dashboard')
   @Roles(AppRole.Admin, AppRole.Administrator, AppRole.User)
-  getDashboard(@CurrentUser() user: KeycloakJwtPayload) {
-    return this.reportsService.getDashboard(user.sub);
+  getDashboard(
+    @CurrentUser() user: KeycloakJwtPayload,
+    @CurrentOrg() organizationId: Types.ObjectId,
+  ) {
+    return this.reportsService.getDashboard(user.sub, organizationId);
   }
 
   /** Rep leaderboard + per-team rollup. */
   @Get('team-performance')
   @Roles(AppRole.Admin, AppRole.Administrator, AppRole.User)
-  getTeamPerformance(@CurrentUser() user: KeycloakJwtPayload) {
-    return this.reportsService.getTeamPerformance(user.sub);
+  getTeamPerformance(
+    @CurrentUser() user: KeycloakJwtPayload,
+    @CurrentOrg() organizationId: Types.ObjectId,
+  ) {
+    return this.reportsService.getTeamPerformance(user.sub, organizationId);
   }
 
   // ── Ad-hoc report execution ─────────────────────────────────────────────────
 
   @Post('run')
   @Roles(AppRole.Admin, AppRole.Administrator, AppRole.User)
-  run(@Body() dto: RunReportDto, @CurrentUser() user: KeycloakJwtPayload) {
-    return this.reportsService.runReport(dto, user.sub);
+  run(
+    @Body() dto: RunReportDto,
+    @CurrentUser() user: KeycloakJwtPayload,
+    @CurrentOrg() organizationId: Types.ObjectId,
+  ) {
+    return this.reportsService.runReport(dto, user.sub, organizationId);
   }
 
   // ── Saved reports ────────────────────────────────────────────────────────────
 
   @Get('saved')
   @Roles(AppRole.Admin, AppRole.Administrator, AppRole.User)
-  findSaved(@CurrentUser() user: KeycloakJwtPayload) {
-    return this.reportsService.findSaved(user.sub);
+  findSaved(
+    @CurrentUser() user: KeycloakJwtPayload,
+    @CurrentOrg() organizationId: Types.ObjectId,
+  ) {
+    return this.reportsService.findSaved(user.sub, organizationId);
   }
 
   @Post('saved')
@@ -67,8 +82,9 @@ export class ReportsController {
   createSaved(
     @Body() dto: CreateSavedReportDto,
     @CurrentUser() user: KeycloakJwtPayload,
+    @CurrentOrg() organizationId: Types.ObjectId,
   ) {
-    return this.reportsService.createSaved(dto, user.sub);
+    return this.reportsService.createSaved(dto, user.sub, organizationId);
   }
 
   @Get('saved/:id')
@@ -76,8 +92,9 @@ export class ReportsController {
   findSavedOne(
     @Param('id') id: string,
     @CurrentUser() user: KeycloakJwtPayload,
+    @CurrentOrg() organizationId: Types.ObjectId,
   ) {
-    return this.reportsService.findSavedOne(id, user.sub);
+    return this.reportsService.findSavedOne(id, user.sub, organizationId);
   }
 
   /** Full replace of a saved report's definition + metadata. */
@@ -87,8 +104,9 @@ export class ReportsController {
     @Param('id') id: string,
     @Body() dto: CreateSavedReportDto,
     @CurrentUser() user: KeycloakJwtPayload,
+    @CurrentOrg() organizationId: Types.ObjectId,
   ) {
-    return this.reportsService.updateSaved(id, dto, user.sub);
+    return this.reportsService.updateSaved(id, dto, user.sub, organizationId);
   }
 
   @Delete('saved/:id')
@@ -97,8 +115,9 @@ export class ReportsController {
   removeSaved(
     @Param('id') id: string,
     @CurrentUser() user: KeycloakJwtPayload,
+    @CurrentOrg() organizationId: Types.ObjectId,
   ) {
-    return this.reportsService.removeSaved(id, user.sub);
+    return this.reportsService.removeSaved(id, user.sub, organizationId);
   }
 
   /** Run a stored report, optionally paging/sorting the result. */
@@ -108,7 +127,13 @@ export class ReportsController {
     @Param('id') id: string,
     @Query() overrides: RunSavedReportDto,
     @CurrentUser() user: KeycloakJwtPayload,
+    @CurrentOrg() organizationId: Types.ObjectId,
   ) {
-    return this.reportsService.runSaved(id, user.sub, overrides);
+    return this.reportsService.runSaved(
+      id,
+      user.sub,
+      organizationId,
+      overrides,
+    );
   }
 }
