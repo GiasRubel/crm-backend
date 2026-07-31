@@ -195,10 +195,7 @@ export class OpportunitiesService {
    * totals. Columns are capped at BOARD_COLUMN_LIMIT cards (most recently
    * updated first); `count`/`totalAmount` always reflect the full column.
    */
-  async getBoard(
-    requesterKeycloakId: string,
-    organizationId: Types.ObjectId,
-  ) {
+  async getBoard(requesterKeycloakId: string, organizationId: Types.ObjectId) {
     const visibility = {
       organizationId,
       ...((await this.buildVisibilityFilter(

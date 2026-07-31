@@ -101,12 +101,7 @@ export class LeadsController {
     @CurrentUser() user: KeycloakJwtPayload,
     @CurrentOrg() organizationId: Types.ObjectId,
   ) {
-    return this.leadsService.addEngagement(
-      id,
-      dto,
-      user.sub,
-      organizationId,
-    );
+    return this.leadsService.addEngagement(id, dto, user.sub, organizationId);
   }
 
   /** Record routing: set/clear the record owner and/or the assigned team. */

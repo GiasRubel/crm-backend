@@ -2,8 +2,14 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import { Organization, OrganizationDocument } from '../organizations/organization.schema';
-import { Subscription, SubscriptionDocument } from '../subscriptions/subscription.schema';
+import {
+  Organization,
+  OrganizationDocument,
+} from '../organizations/organization.schema';
+import {
+  Subscription,
+  SubscriptionDocument,
+} from '../subscriptions/subscription.schema';
 import { DeploymentMode, getDeploymentMode } from '../config/deployment-mode';
 
 const DEFAULT_ORG_SLUG = 'default';
@@ -50,11 +56,14 @@ export class DefaultOrgService implements OnModuleInit {
         slug: DEFAULT_ORG_SLUG,
         status: 'active',
       });
-      this.logger.log(`Created default organization: ${organization._id.toString()}`);
+      this.logger.log(
+        `Created default organization: ${organization._id.toString()}`,
+      );
     }
 
-    const hasSubscription = await this.subscriptionModel
-      .exists({ organizationId: organization._id });
+    const hasSubscription = await this.subscriptionModel.exists({
+      organizationId: organization._id,
+    });
 
     if (!hasSubscription) {
       await this.subscriptionModel.create({
@@ -62,7 +71,9 @@ export class DefaultOrgService implements OnModuleInit {
         stripeCustomerId: 'standalone-no-stripe-customer',
         status: 'active',
       });
-      this.logger.log(`Created default subscription for org ${organization._id.toString()}`);
+      this.logger.log(
+        `Created default subscription for org ${organization._id.toString()}`,
+      );
     }
 
     this.cachedOrgId = organization._id;

@@ -181,8 +181,11 @@ request because mail failed.
   service-account client, distinct from the public `crm-frontend` client used to
   validate user tokens).
 - No global route prefix is set — controllers own their full paths (e.g.
-  `@Controller('auth/otp')`). The frontend's `next.config.ts` rewrites `/api/*` to
-  this server, but backend routes are **not** under `/api`.
+  `@Controller('auth/otp')`). The frontend no longer calls this server directly
+  from the browser — it's a BFF now (see `../crm-frontend/CLAUDE.md`): browser
+  requests hit the frontend's same-origin `/api/backend/*` proxy, which forwards
+  to this server's root paths server-side. `next.config.ts` still rewrites
+  `/files/*` and `/swagger/*` directly for same-origin asset/doc access.
 - `KeycloakAdminService.sendSetPasswordEmail` passes `client_id`/`redirect_uri`
   so the user lands back on `/dashboard` after setting their password —
   without those params Keycloak strands them on its own generic account page.

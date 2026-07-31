@@ -14,8 +14,9 @@ Our authentication mechanism follows enterprise security guidelines by decouplin
 * **Cross-Client Protection (azp validation):** The backend explicitly enforces that the `azp` (Authorized Party) claim in the incoming JWT matches our frontend client ID (`crm-frontend`), preventing cross-client token reuse attacks.
 
 ### 🔒 Implemented Security Protocols
-* **PKCE S256 (Proof Key for Code Exchange):** Implemented on the frontend to protect Authorization Code Grants against interception attacks in public clients (SPAs).
-* **check-sso (Silent SSO):** Enabled on the frontend for seamless background session checks without jarring screen redirects.
+* **Backend-for-Frontend (BFF):** The Next.js server owns the entire OIDC Authorization Code flow and holds a confidential client secret (see §1D). The browser never receives an access/refresh token — it only gets an httpOnly, encrypted session cookie. All API calls from the browser go through a same-origin proxy (`/api/backend/*`) that attaches the real bearer token server-side.
+* **PKCE S256 (Proof Key for Code Exchange):** Still used defensively during the server-side code exchange even though the client is confidential.
+* **Server-side session gating:** `crm-frontend/src/proxy.ts` (Next.js 16's successor to `middleware.ts`) resolves the session cookie — and silently refreshes the access token via the refresh token — before a protected page ever renders. This replaces the old client-side `check-sso` iframe bounce: no client round-trip is needed to know if the user is logged in.
 * **Global Security Guard:** Every route is locked by default using a global guard. Public endpoints must explicitly declare the `@Public()` decorator.
 
 ---
@@ -33,6 +34,34 @@ Open your browser and navigate to the Keycloak Admin Console at `http://localhos
 6. Under **Login settings**, set **Valid redirect URIs** to `http://localhost:3001/*`.
 7. Set **Web origins** to `http://localhost:3001`.
 8. Scroll down to the bottom of the page and click **Save**.
+
+> As of the BFF migration (see §1D below), this client must be reconfigured as
+> **confidential** — the steps above describe the legacy public/PKCE-only setup.
+> Follow 1D instead for new environments.
+
+### 1D — Convert `crm-frontend` to a Confidential Client (BFF)
+
+The frontend no longer runs OIDC in the browser — the Next.js server now owns
+the Authorization Code flow and can safely hold a client secret. `crm-frontend`
+must be switched from a public (PKCE-only) client to a confidential one:
+
+1. Open **Clients** → `crm-frontend`.
+2. Toggle **Client Authentication** to **On** (this makes it a Confidential
+   Client, mirroring `crm-backend-service` in 1B).
+3. Under **Login settings**, update **Valid redirect URIs** to include
+   `http://localhost:3001/api/auth/callback` (the new server-side callback route
+   — the old catch-all `http://localhost:3001/*` can be narrowed to just this).
+4. Add `http://localhost:3001` to **Valid post logout redirect URIs** (used by
+   RP-initiated logout after `GET /api/auth/logout`). **Match this exactly**
+   against `APP_BASE_URL` — Keycloak compares post-logout URIs literally, so a
+   configured `http://localhost:3001` rejects a sent `http://localhost:3001/`
+   with "Invalid redirect uri". The logout route strips the trailing slash for
+   this reason; if you prefer, `http://localhost:3001/*` matches either form.
+5. Click **Save**, then open the newly visible **Credentials** tab and copy the
+   **Client Secret** — this becomes `KEYCLOAK_CLIENT_SECRET` in
+   `crm-frontend/.env.local`.
+6. **Standard Flow** must remain checked; **Direct Access Grants** can stay off.
+   PKCE is still used defensively even though the client is now confidential.
 
 ### 1B — Create Admin Service Client (`crm-backend-service`)
 1. Click on **Clients** from the left-hand navigation menu.
@@ -144,12 +173,62 @@ KEYCLOAK_ADMIN_CLIENT_SECRET=DmmalMglvoq4MNMPd79fbOBYfKepP8j2
 ```
 
 ### 3B — NextJS Frontend Configurations (`crm-frontend/.env.local`)
+
+Since the BFF migration, the frontend no longer talks to Keycloak from the
+browser — these are all server-only vars (no `NEXT_PUBLIC_` prefix):
+
 ```env
-
 PORT=3001
-NEXT_PUBLIC_API_BASE_URL=http://localhost:5000
 
-NEXT_PUBLIC_KEYCLOAK_URL=http://localhost:18080
-NEXT_PUBLIC_KEYCLOAK_REALM=crm-realm
-NEXT_PUBLIC_KEYCLOAK_CLIENT_ID=crm-frontend
+APP_BASE_URL=http://localhost:3001
+BACKEND_INTERNAL_URL=http://localhost:5000
+
+KEYCLOAK_ISSUER=http://localhost:18080/realms/crm-realm
+KEYCLOAK_REALM=crm-realm
+KEYCLOAK_CLIENT_ID=crm-frontend
+KEYCLOAK_CLIENT_SECRET=<from crm-frontend client's Credentials tab, see 1D>
+
+SESSION_SECRET=<openssl rand -hex 32>
 ```
+
+---
+
+## Part 4 — How the BFF Login Flow Works
+
+End-to-end, for a user hitting a protected page while logged out:
+
+1. `proxy.ts` finds no session cookie → redirects to
+   `GET /api/auth/login?returnTo=/dashboard`.
+2. **`/api/auth/login`** generates a PKCE `code_verifier` + `state`, seals both
+   (plus `returnTo`) into a short-lived `crm_oauth_flow` cookie, and redirects
+   to Keycloak's authorization endpoint. `?idpHint=google|facebook` skips
+   straight to a social provider; `?register=true` targets Keycloak's
+   registration form instead of its login form.
+3. The user authenticates at Keycloak, which redirects back to
+   **`/api/auth/callback?code=…&state=…`**.
+4. The callback exchanges the code for tokens **server-side** (confidential
+   client secret + PKCE verifier), then seals `{ accessToken, refreshToken,
+   expiresAt }` into the httpOnly `crm_session` cookie and redirects to
+   `returnTo`. The browser is never given a token.
+5. On subsequent requests, `proxy.ts` unseals the cookie; if the access token is
+   within 30s of expiry it runs a refresh-token grant and re-seals the cookie
+   transparently.
+6. Browser API calls go to same-origin `/api/backend/*`, which reads the cookie
+   server-side, attaches `Authorization: Bearer <access_token>`, and forwards to
+   this NestJS API — whose `JwtStrategy` validates it exactly as before.
+7. **`/api/auth/logout`** clears the cookies and redirects to Keycloak's
+   end-session endpoint with `id_token_hint`, ending the SSO session too.
+
+### Session cookie mechanics (two non-obvious constraints)
+
+* **The session cookie is chunked** across `crm_session.0`, `crm_session.1`, …
+  Browsers silently discard any single cookie larger than ~4 KB — no error is
+  raised anywhere — and a sealed Keycloak access+refresh token pair lands right
+  at that boundary. Writing it as one cookie makes the browser drop it, which
+  the app reads as "logged out" and turns into an infinite login redirect loop.
+  Always go through the helpers in `crm-frontend/src/lib/auth/session.ts`.
+* **The `id_token` lives in its own cookie** (`crm_id_token.*`), scoped to
+  `path=/api/auth/logout` so its ~1.7 KB is not re-sent on every API request.
+  It is required: without `id_token_hint`, Keycloak cannot identify the session
+  being ended and interrupts logout with a "Do you want to log out?"
+  confirmation page.

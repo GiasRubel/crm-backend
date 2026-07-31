@@ -365,7 +365,11 @@ export class LeadsService {
     if (dto.email !== undefined) {
       const newEmail = dto.email.trim().toLowerCase();
       if (newEmail !== lead.email) {
-        await this.assertNoOpenLeadWithEmail(newEmail, organizationId, lead._id);
+        await this.assertNoOpenLeadWithEmail(
+          newEmail,
+          organizationId,
+          lead._id,
+        );
         lead.email = newEmail;
       }
     }

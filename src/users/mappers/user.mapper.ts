@@ -5,6 +5,7 @@ import { UserResponseDto } from '../dto/user-response.dto';
 export function toUserResponseDto(user: UserDocument): UserResponseDto {
   return {
     id: user._id.toString(),
+    keycloakId: user.keycloakId,
     email: user.email,
     username: user.username ?? '',
     firstName: user.firstName ?? '',

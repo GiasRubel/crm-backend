@@ -9,7 +9,12 @@ export type RunStatus = (typeof RUN_STATUSES)[number];
 /** Execution-log entry: one rule firing against one record. */
 @Schema({ timestamps: true })
 export class AutomationRun {
-  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Organization', required: true, index: true })
+  @Prop({
+    type: MongooseSchema.Types.ObjectId,
+    ref: 'Organization',
+    required: true,
+    index: true,
+  })
   organizationId: Types.ObjectId;
 
   @Prop({

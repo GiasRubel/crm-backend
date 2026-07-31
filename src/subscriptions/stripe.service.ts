@@ -16,14 +16,18 @@ export class StripeService {
 
   constructor(private readonly configService: ConfigService) {
     const secretKey = this.configService.get<string>('STRIPE_SECRET_KEY');
-    this.webhookSecret = this.configService.get<string>('STRIPE_WEBHOOK_SECRET');
+    this.webhookSecret = this.configService.get<string>(
+      'STRIPE_WEBHOOK_SECRET',
+    );
 
     this.stripe = secretKey
       ? new Stripe(secretKey, { apiVersion: '2025-01-27.acpi' as any })
       : null;
 
     if (!this.stripe) {
-      this.logger.warn('STRIPE_SECRET_KEY not set — billing features are disabled.');
+      this.logger.warn(
+        'STRIPE_SECRET_KEY not set — billing features are disabled.',
+      );
     }
   }
 
@@ -40,7 +44,9 @@ export class StripeService {
         email,
         name,
       });
-      this.logger.log(`Created Stripe customer: ${customer.id} for email ${email}`);
+      this.logger.log(
+        `Created Stripe customer: ${customer.id} for email ${email}`,
+      );
       return customer;
     } catch (error) {
       this.logger.error(`Stripe createCustomer failed:`, error);
@@ -48,7 +54,11 @@ export class StripeService {
     }
   }
 
-  async createSubscription(customerId: string, priceId: string, trialDays?: number): Promise<Stripe.Subscription> {
+  async createSubscription(
+    customerId: string,
+    priceId: string,
+    trialDays?: number,
+  ): Promise<Stripe.Subscription> {
     try {
       const subscription = await this.requireStripe().subscriptions.create({
         customer: customerId,
@@ -57,7 +67,9 @@ export class StripeService {
         payment_behavior: 'default_incomplete',
         payment_settings: { save_default_payment_method: 'on_subscription' },
       });
-      this.logger.log(`Created Stripe subscription: ${subscription.id} for customer ${customerId}`);
+      this.logger.log(
+        `Created Stripe subscription: ${subscription.id} for customer ${customerId}`,
+      );
       return subscription;
     } catch (error) {
       this.logger.error(`Stripe createSubscription failed:`, error);
@@ -65,13 +77,18 @@ export class StripeService {
     }
   }
 
-  async createBillingPortalSession(customerId: string, returnUrl: string): Promise<Stripe.BillingPortal.Session> {
+  async createBillingPortalSession(
+    customerId: string,
+    returnUrl: string,
+  ): Promise<Stripe.BillingPortal.Session> {
     try {
       const session = await this.requireStripe().billingPortal.sessions.create({
         customer: customerId,
         return_url: returnUrl,
       });
-      this.logger.log(`Created Stripe billing portal session: ${session.url} for customer ${customerId}`);
+      this.logger.log(
+        `Created Stripe billing portal session: ${session.url} for customer ${customerId}`,
+      );
       return session;
     } catch (error) {
       this.logger.error(`Stripe createBillingPortalSession failed:`, error);
@@ -81,12 +98,21 @@ export class StripeService {
 
   constructEvent(rawBody: string | Buffer, signature: string): Stripe.Event {
     if (!this.webhookSecret) {
-      throw new Error('Stripe is not configured (STRIPE_WEBHOOK_SECRET missing).');
+      throw new Error(
+        'Stripe is not configured (STRIPE_WEBHOOK_SECRET missing).',
+      );
     }
     try {
-      return this.requireStripe().webhooks.constructEvent(rawBody, signature, this.webhookSecret);
+      return this.requireStripe().webhooks.constructEvent(
+        rawBody,
+        signature,
+        this.webhookSecret,
+      );
     } catch (error) {
-      this.logger.error(`Stripe constructEvent signature verification failed:`, error);
+      this.logger.error(
+        `Stripe constructEvent signature verification failed:`,
+        error,
+      );
       throw error;
     }
   }

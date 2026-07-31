@@ -653,9 +653,7 @@ export class AutomationsService implements OnModuleInit, OnModuleDestroy {
     ] = await Promise.all([
       this.ruleModel.countDocuments({ organizationId }).exec(),
       this.ruleModel.countDocuments({ organizationId, isActive: true }).exec(),
-      this.ruleModel
-        .countDocuments({ organizationId, kind: 'trigger' })
-        .exec(),
+      this.ruleModel.countDocuments({ organizationId, kind: 'trigger' }).exec(),
       this.ruleModel.countDocuments({ organizationId, kind: 'sla' }).exec(),
       this.runModel
         .countDocuments({ organizationId, createdAt: { $gte: dayAgo } })

@@ -41,7 +41,8 @@ export class SubscriptionsController {
     if (!organizationId) {
       throw new NotFoundException('Organization context missing');
     }
-    const sub = await this.subscriptionsService.findDocByOrganizationId(organizationId);
+    const sub =
+      await this.subscriptionsService.findDocByOrganizationId(organizationId);
     if (!sub) {
       throw new NotFoundException('Subscription not found');
     }
@@ -58,12 +59,14 @@ export class SubscriptionsController {
     if (!organizationId) {
       throw new NotFoundException('Organization context missing');
     }
-    const sub = await this.subscriptionsService.findDocByOrganizationId(organizationId);
+    const sub =
+      await this.subscriptionsService.findDocByOrganizationId(organizationId);
     if (!sub || !sub.stripeCustomerId) {
       throw new NotFoundException('Subscription or Stripe Customer not found');
     }
 
-    const frontendUrl = this.configService.get<string>('FRONTEND_URL') ?? 'http://localhost:3001';
+    const frontendUrl =
+      this.configService.get<string>('FRONTEND_URL') ?? 'http://localhost:3001';
     const session = await this.stripeService.createBillingPortalSession(
       sub.stripeCustomerId,
       `${frontendUrl}/dashboard`,
@@ -88,7 +91,9 @@ export class SubscriptionsController {
     switch (event.type) {
       case 'customer.subscription.updated': {
         const sub = event.data.object as any;
-        const periodEnd = sub.current_period_end ? new Date(sub.current_period_end * 1000) : undefined;
+        const periodEnd = sub.current_period_end
+          ? new Date(sub.current_period_end * 1000)
+          : undefined;
         await this.subscriptionsService.updateByStripeSubscriptionId(sub.id, {
           status: sub.status,
           currentPeriodEnd: periodEnd,
@@ -106,18 +111,24 @@ export class SubscriptionsController {
       case 'invoice.payment_failed': {
         const invoice = event.data.object as any;
         if (typeof invoice.subscription === 'string') {
-          await this.subscriptionsService.updateByStripeSubscriptionId(invoice.subscription, {
-            status: 'past_due',
-          });
+          await this.subscriptionsService.updateByStripeSubscriptionId(
+            invoice.subscription,
+            {
+              status: 'past_due',
+            },
+          );
         }
         break;
       }
       case 'invoice.paid': {
         const invoice = event.data.object as any;
         if (typeof invoice.subscription === 'string') {
-          await this.subscriptionsService.updateByStripeSubscriptionId(invoice.subscription, {
-            status: 'active',
-          });
+          await this.subscriptionsService.updateByStripeSubscriptionId(
+            invoice.subscription,
+            {
+              status: 'active',
+            },
+          );
         }
         break;
       }

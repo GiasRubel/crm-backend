@@ -101,12 +101,7 @@ export class ActivitiesController {
     @CurrentUser() user: KeycloakJwtPayload,
     @CurrentOrg() organizationId: Types.ObjectId,
   ) {
-    return this.activitiesService.setStatus(
-      id,
-      dto,
-      user.sub,
-      organizationId,
-    );
+    return this.activitiesService.setStatus(id, dto, user.sub, organizationId);
   }
 
   /** Reassign responsibility and/or team routing. */

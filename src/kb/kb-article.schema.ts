@@ -16,7 +16,12 @@ export type KbVisibility = (typeof KB_VISIBILITIES)[number];
  */
 @Schema({ timestamps: true })
 export class KbArticle {
-  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Organization', required: true, index: true })
+  @Prop({
+    type: MongooseSchema.Types.ObjectId,
+    ref: 'Organization',
+    required: true,
+    index: true,
+  })
   organizationId: Types.ObjectId;
 
   @Prop({ required: true, trim: true })

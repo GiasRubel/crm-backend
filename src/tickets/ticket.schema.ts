@@ -58,7 +58,12 @@ export const TicketCommentSchema = SchemaFactory.createForClass(TicketComment);
 
 @Schema({ timestamps: true })
 export class Ticket {
-  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Organization', required: true, index: true })
+  @Prop({
+    type: MongooseSchema.Types.ObjectId,
+    ref: 'Organization',
+    required: true,
+    index: true,
+  })
   organizationId: Types.ObjectId;
 
   /** Human-readable reference (TKT-1001), from an atomic counter. */

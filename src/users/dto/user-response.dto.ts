@@ -2,6 +2,7 @@ import { AppRole } from '../app-role.enum';
 
 export class UserResponseDto {
   id: string;
+  keycloakId: string;
   email: string;
   username: string;
   firstName: string;

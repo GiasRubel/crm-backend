@@ -1,7 +1,13 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
-import { Organization, OrganizationSchema } from '../organizations/organization.schema';
-import { Subscription, SubscriptionSchema } from '../subscriptions/subscription.schema';
+import {
+  Organization,
+  OrganizationSchema,
+} from '../organizations/organization.schema';
+import {
+  Subscription,
+  SubscriptionSchema,
+} from '../subscriptions/subscription.schema';
 import { DefaultOrgService } from './default-org.service';
 
 /**

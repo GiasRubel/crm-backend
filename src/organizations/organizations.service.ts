@@ -33,7 +33,9 @@ export class OrganizationsService {
     private readonly stripeService: StripeService,
   ) {}
 
-  async provision(dto: ProvisionOrganizationDto): Promise<OrganizationResponseDto> {
+  async provision(
+    dto: ProvisionOrganizationDto,
+  ): Promise<OrganizationResponseDto> {
     const slug = dto.slug.trim().toLowerCase();
     const email = dto.adminEmail.trim().toLowerCase();
 
@@ -110,12 +112,16 @@ export class OrganizationsService {
       // Stripe integration (Phase 6)
       if (dto.planId) {
         try {
-          const stripeCustomer = await this.stripeService.createCustomer(email, dto.name.trim());
-          const stripeSubscription = (await this.stripeService.createSubscription(
-            stripeCustomer.id,
-            dto.planId,
-            dto.trialDays,
-          )) as any;
+          const stripeCustomer = await this.stripeService.createCustomer(
+            email,
+            dto.name.trim(),
+          );
+          const stripeSubscription =
+            (await this.stripeService.createSubscription(
+              stripeCustomer.id,
+              dto.planId,
+              dto.trialDays,
+            )) as any;
 
           // Update subscription doc with real IDs and status from Stripe
           const periodEnd = stripeSubscription.current_period_end
@@ -125,11 +131,14 @@ export class OrganizationsService {
           await this.subscriptionsService.update(organizationId.toString(), {
             stripeCustomerId: stripeCustomer.id,
             stripeSubscriptionId: stripeSubscription.id,
-            status: stripeSubscription.status as any,
+            status: stripeSubscription.status,
             currentPeriodEnd: periodEnd,
           });
         } catch (stripeError) {
-          this.logger.error(`Failed during Stripe provisioning for ${email}:`, stripeError);
+          this.logger.error(
+            `Failed during Stripe provisioning for ${email}:`,
+            stripeError,
+          );
           throw stripeError;
         }
       }
@@ -144,7 +153,9 @@ export class OrganizationsService {
         );
       }
 
-      this.logger.log(`Organization provisioned successfully: ${organizationId.toString()} (slug: ${slug})`);
+      this.logger.log(
+        `Organization provisioned successfully: ${organizationId.toString()} (slug: ${slug})`,
+      );
       return toOrganizationResponseDto(organization);
     } catch (error) {
       this.logger.error(
@@ -155,23 +166,36 @@ export class OrganizationsService {
       // Rollback database writes in reverse order
       if (createdSubDoc) {
         try {
-          await this.subscriptionsService.deleteByOrganizationId(organizationId.toString());
+          await this.subscriptionsService.deleteByOrganizationId(
+            organizationId.toString(),
+          );
         } catch (subError) {
-          this.logger.error(`Rollback failure: could not delete subscription for org ${organizationId.toString()}:`, subError);
+          this.logger.error(
+            `Rollback failure: could not delete subscription for org ${organizationId.toString()}:`,
+            subError,
+          );
         }
       }
       if (createdOrgDoc) {
         try {
-          await this.organizationModel.deleteOne({ _id: organizationId }).exec();
+          await this.organizationModel
+            .deleteOne({ _id: organizationId })
+            .exec();
         } catch (orgError) {
-          this.logger.error(`Rollback failure: could not delete organization ${organizationId.toString()}:`, orgError);
+          this.logger.error(
+            `Rollback failure: could not delete organization ${organizationId.toString()}:`,
+            orgError,
+          );
         }
       }
       if (createdUserDoc) {
         try {
           await this.usersService.deleteByKeycloakId(keycloakId);
         } catch (userError) {
-          this.logger.error(`Rollback failure: could not delete user ${keycloakId}:`, userError);
+          this.logger.error(
+            `Rollback failure: could not delete user ${keycloakId}:`,
+            userError,
+          );
         }
       }
 
@@ -179,7 +203,10 @@ export class OrganizationsService {
       try {
         await this.keycloakAdminService.deleteUser(keycloakId);
       } catch (kcError) {
-        this.logger.error(`Rollback critical failure: could not delete Keycloak user ${keycloakId}:`, kcError);
+        this.logger.error(
+          `Rollback critical failure: could not delete Keycloak user ${keycloakId}:`,
+          kcError,
+        );
       }
 
       if (
@@ -256,7 +283,9 @@ export class OrganizationsService {
       .findOne({ slug: slug.trim().toLowerCase() })
       .exec();
     if (existing) {
-      throw new ConflictException('An organization with this slug already exists');
+      throw new ConflictException(
+        'An organization with this slug already exists',
+      );
     }
   }
 }

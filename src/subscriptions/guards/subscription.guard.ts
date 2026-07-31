@@ -13,7 +13,10 @@ import { IS_BILLING_EXEMPT_KEY } from '../../auth/decorators/billing-exempt.deco
 import { AppRole } from '../../users/app-role.enum';
 import { SUBSCRIPTION_ACTIVE_STATUSES } from '../subscription.schema';
 import { UsersService } from '../../users/users.service';
-import { DeploymentMode, getDeploymentMode } from '../../config/deployment-mode';
+import {
+  DeploymentMode,
+  getDeploymentMode,
+} from '../../config/deployment-mode';
 
 @Injectable()
 export class SubscriptionGuard implements CanActivate {
@@ -31,10 +34,10 @@ export class SubscriptionGuard implements CanActivate {
     }
 
     // 1. Skip entirely for public routes
-    const isPublic = this.reflector.getAllAndOverride<boolean>(
-      IS_PUBLIC_KEY,
-      [context.getHandler(), context.getClass()],
-    );
+    const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
     if (isPublic) {
       return true;
     }
@@ -79,7 +82,8 @@ export class SubscriptionGuard implements CanActivate {
       );
     }
 
-    const subscription = await this.subscriptionsService.findDocByOrganizationId(orgId);
+    const subscription =
+      await this.subscriptionsService.findDocByOrganizationId(orgId);
     if (!subscription) {
       throw new HttpException(
         'Subscription not found for organization',

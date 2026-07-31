@@ -69,9 +69,13 @@ export class LicensingService implements OnModuleInit {
       .update(dto.purchaseCode.trim())
       .digest('hex');
 
-    const existing = await this.licenseModel.findOne({ purchaseCodeHash }).exec();
+    const existing = await this.licenseModel
+      .findOne({ purchaseCodeHash })
+      .exec();
     if (existing) {
-      throw new ConflictException('This purchase code has already been used to activate an installation');
+      throw new ConflictException(
+        'This purchase code has already been used to activate an installation',
+      );
     }
 
     await this.licenseModel.create({
@@ -98,8 +102,13 @@ export class LicensingService implements OnModuleInit {
         headers: { Authorization: `Bearer ${token}` },
       });
     } catch (error) {
-      this.logger.error('Envato purchase-code verification request failed:', error);
-      throw new BadRequestException('Could not reach Envato to verify the purchase code');
+      this.logger.error(
+        'Envato purchase-code verification request failed:',
+        error,
+      );
+      throw new BadRequestException(
+        'Could not reach Envato to verify the purchase code',
+      );
     }
 
     if (!response.ok) {

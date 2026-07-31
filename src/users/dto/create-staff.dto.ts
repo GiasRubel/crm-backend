@@ -1,7 +1,17 @@
-import { IsEmail, IsEnum, IsNotEmpty, IsString, MaxLength } from 'class-validator';
+import {
+  IsEmail,
+  IsEnum,
+  IsNotEmpty,
+  IsString,
+  MaxLength,
+} from 'class-validator';
 import { AppRole } from '../app-role.enum';
 
-const STAFF_ROLES = [AppRole.User, AppRole.Admin, AppRole.Administrator] as const;
+const STAFF_ROLES = [
+  AppRole.User,
+  AppRole.Admin,
+  AppRole.Administrator,
+] as const;
 
 export class CreateStaffDto {
   @IsEmail()

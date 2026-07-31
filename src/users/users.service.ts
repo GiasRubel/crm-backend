@@ -14,7 +14,10 @@ import { AppRole } from './app-role.enum';
 import { CreateStaffDto } from './dto/create-staff.dto';
 import { StaffUserResponseDto } from './dto/staff-user-response.dto';
 import { UserResponseDto } from './dto/user-response.dto';
-import { toStaffUserResponseDto, toUserResponseDto } from './mappers/user.mapper';
+import {
+  toStaffUserResponseDto,
+  toUserResponseDto,
+} from './mappers/user.mapper';
 import { User, UserDocument } from './users.schema';
 import { DefaultOrgService } from '../bootstrap/default-org.service';
 import { DeploymentMode, getDeploymentMode } from '../config/deployment-mode';
@@ -205,7 +208,8 @@ export class UsersService {
     if (getDeploymentMode(this.configService) === DeploymentMode.Standalone) {
       const userCount = await this.userModel.estimatedDocumentCount().exec();
       if (userCount === 0) {
-        const organizationId = await this.defaultOrgService.getDefaultOrganizationId();
+        const organizationId =
+          await this.defaultOrgService.getDefaultOrganizationId();
         return this.createUser(
           payload.sub,
           identity.email,
