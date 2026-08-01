@@ -10,6 +10,7 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { Types } from 'mongoose';
 import { CurrentOrg } from '../auth/decorators/current-org.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -21,6 +22,8 @@ import { TeamQueryDto } from './dto/team-query.dto';
 import { UpdateTeamDto } from './dto/update-team.dto';
 import { TeamsService } from './teams.service';
 
+@ApiTags('teams')
+@ApiBearerAuth('access-token')
 @Controller('teams')
 export class TeamsController {
   constructor(private readonly teamsService: TeamsService) {}

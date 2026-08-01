@@ -10,6 +10,7 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { Types } from 'mongoose';
 import { CurrentOrg } from '../auth/decorators/current-org.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -22,6 +23,8 @@ import { CreateCustomerDto } from './dto/create-customer.dto';
 import { CustomerQueryDto } from './dto/customer-query.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
 
+@ApiTags('customers')
+@ApiBearerAuth('access-token')
 @Controller('customers')
 export class CustomersController {
   constructor(private readonly customersService: CustomersService) {}

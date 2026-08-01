@@ -10,6 +10,7 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { Types } from 'mongoose';
 import { CurrentOrg } from '../auth/decorators/current-org.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -23,6 +24,8 @@ import { ContactQueryDto } from './dto/contact-query.dto';
 import { CreateContactDto } from './dto/create-contact.dto';
 import { UpdateContactDto } from './dto/update-contact.dto';
 
+@ApiTags('contacts')
+@ApiBearerAuth('access-token')
 @Controller('contacts')
 export class ContactsController {
   constructor(private readonly contactsService: ContactsService) {}

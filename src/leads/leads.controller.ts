@@ -10,6 +10,7 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { Types } from 'mongoose';
 import { CurrentOrg } from '../auth/decorators/current-org.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -26,6 +27,7 @@ import { LeadQueryDto } from './dto/lead-query.dto';
 import { UpdateLeadDto } from './dto/update-lead.dto';
 import { LeadsService } from './leads.service';
 
+@ApiTags('leads')
 @Controller('leads')
 export class LeadsController {
   constructor(private readonly leadsService: LeadsService) {}
@@ -43,6 +45,7 @@ export class LeadsController {
   }
 
   @Post()
+  @ApiBearerAuth('access-token')
   @Roles(AppRole.Admin, AppRole.Administrator, AppRole.User)
   create(
     @Body() dto: CreateLeadDto,
@@ -53,6 +56,7 @@ export class LeadsController {
   }
 
   @Get()
+  @ApiBearerAuth('access-token')
   @Roles(AppRole.Admin, AppRole.Administrator, AppRole.User)
   findAll(
     @Query() query: LeadQueryDto,
@@ -63,6 +67,7 @@ export class LeadsController {
   }
 
   @Get('stats')
+  @ApiBearerAuth('access-token')
   @Roles(AppRole.Admin, AppRole.Administrator, AppRole.User)
   getStats(
     @CurrentUser() user: KeycloakJwtPayload,
@@ -72,6 +77,7 @@ export class LeadsController {
   }
 
   @Get(':id')
+  @ApiBearerAuth('access-token')
   @Roles(AppRole.Admin, AppRole.Administrator, AppRole.User)
   findOne(
     @Param('id') id: string,
@@ -82,6 +88,7 @@ export class LeadsController {
   }
 
   @Patch(':id')
+  @ApiBearerAuth('access-token')
   @Roles(AppRole.Admin, AppRole.Administrator, AppRole.User)
   update(
     @Param('id') id: string,
@@ -94,6 +101,7 @@ export class LeadsController {
 
   /** Log an engagement touchpoint; the lead score is recomputed. */
   @Post(':id/engagements')
+  @ApiBearerAuth('access-token')
   @Roles(AppRole.Admin, AppRole.Administrator, AppRole.User)
   addEngagement(
     @Param('id') id: string,
@@ -106,6 +114,7 @@ export class LeadsController {
 
   /** Record routing: set/clear the record owner and/or the assigned team. */
   @Patch(':id/assign')
+  @ApiBearerAuth('access-token')
   @Roles(AppRole.Admin, AppRole.Administrator)
   assign(
     @Param('id') id: string,
@@ -117,6 +126,7 @@ export class LeadsController {
 
   /** Convert a qualified lead into a Customer (+ optionally an Opportunity). */
   @Post(':id/convert')
+  @ApiBearerAuth('access-token')
   @Roles(AppRole.Admin, AppRole.Administrator, AppRole.User)
   convert(
     @Param('id') id: string,
@@ -128,6 +138,7 @@ export class LeadsController {
   }
 
   @Delete(':id')
+  @ApiBearerAuth('access-token')
   @Roles(AppRole.Admin, AppRole.Administrator)
   @HttpCode(HttpStatus.NO_CONTENT)
   remove(

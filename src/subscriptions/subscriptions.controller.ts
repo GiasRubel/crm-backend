@@ -10,6 +10,7 @@ import {
   Req,
   BadRequestException,
 } from '@nestjs/common';
+import { ApiBearerAuth, ApiExcludeEndpoint, ApiTags } from '@nestjs/swagger';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { AppRole } from '../users/app-role.enum';
 import { CreateSubscriptionDto } from './dto/create-subscription.dto';
@@ -26,6 +27,7 @@ import { BillingExempt } from '../auth/decorators/billing-exempt.decorator';
  * Manual, owner-managed billing for now (no public checkout). Stripe
  * webhook/portal endpoints are added in a later phase.
  */
+@ApiTags('subscriptions')
 @Controller('subscriptions')
 @Roles(AppRole.PlatformAdmin)
 export class SubscriptionsController {
@@ -36,6 +38,7 @@ export class SubscriptionsController {
   ) {}
 
   @Get('me')
+  @ApiBearerAuth('access-token')
   @Roles(AppRole.User, AppRole.Admin, AppRole.Administrator)
   async getMySubscription(@CurrentOrg() organizationId: Types.ObjectId) {
     if (!organizationId) {
@@ -53,6 +56,7 @@ export class SubscriptionsController {
   }
 
   @Post('portal-session')
+  @ApiBearerAuth('access-token')
   @Roles(AppRole.Admin)
   @BillingExempt()
   async createPortalSession(@CurrentOrg() organizationId: Types.ObjectId) {
@@ -77,6 +81,7 @@ export class SubscriptionsController {
 
   @Post('webhook')
   @Public()
+  @ApiExcludeEndpoint()
   async handleWebhook(
     @Headers('stripe-signature') signature: string,
     @Req() req: any,
@@ -138,16 +143,19 @@ export class SubscriptionsController {
   }
 
   @Post()
+  @ApiBearerAuth('access-token')
   create(@Body() dto: CreateSubscriptionDto) {
     return this.subscriptionsService.create(dto);
   }
 
   @Get('organization/:organizationId')
+  @ApiBearerAuth('access-token')
   findByOrganization(@Param('organizationId') organizationId: string) {
     return this.subscriptionsService.findByOrganizationId(organizationId);
   }
 
   @Patch('organization/:organizationId')
+  @ApiBearerAuth('access-token')
   update(
     @Param('organizationId') organizationId: string,
     @Body() dto: UpdateSubscriptionDto,

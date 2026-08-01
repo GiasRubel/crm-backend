@@ -10,6 +10,7 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { Types } from 'mongoose';
 import { CurrentOrg } from '../auth/decorators/current-org.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -22,6 +23,8 @@ import { CreateAutomationRuleDto } from './dto/create-automation-rule.dto';
 import { UpdateAutomationRuleDto } from './dto/update-automation-rule.dto';
 
 /** Rule engine configuration is admin-only end to end. */
+@ApiTags('automations')
+@ApiBearerAuth('access-token')
 @Controller('automations')
 @Roles(AppRole.Admin, AppRole.Administrator)
 export class AutomationsController {

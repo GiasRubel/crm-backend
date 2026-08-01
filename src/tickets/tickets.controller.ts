@@ -10,6 +10,7 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { Types } from 'mongoose';
 import { CurrentOrg } from '../auth/decorators/current-org.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -27,6 +28,8 @@ import { SetTicketStatusDto } from './dto/ticket-status.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
 import { TicketsService } from './tickets.service';
 
+@ApiTags('tickets')
+@ApiBearerAuth('access-token')
 @Controller('tickets')
 export class TicketsController {
   constructor(private readonly ticketsService: TicketsService) {}

@@ -1,9 +1,11 @@
 import { Controller, Get } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { ApiTags } from '@nestjs/swagger';
 import { Public } from './auth/decorators/public.decorator';
 import { AppService } from './app.service';
 import { getDeploymentMode } from './config/deployment-mode';
 
+@ApiTags('app')
 @Controller()
 export class AppController {
   constructor(

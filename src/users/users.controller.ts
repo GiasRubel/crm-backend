@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Post } from '@nestjs/common';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentOrg } from '../auth/decorators/current-org.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -11,6 +12,8 @@ import { UserResponseDto } from './dto/user-response.dto';
 import { toStaffUserResponseDto } from './mappers/user.mapper';
 import { UsersService } from './users.service';
 
+@ApiTags('users')
+@ApiBearerAuth('access-token')
 @Controller('users')
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}

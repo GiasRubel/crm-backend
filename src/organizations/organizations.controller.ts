@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { AppRole } from '../users/app-role.enum';
 import { CreateOrganizationDto } from './dto/create-organization.dto';
@@ -7,6 +8,8 @@ import { ProvisionOrganizationDto } from './dto/provision-organization.dto';
 import { OrganizationsService } from './organizations.service';
 
 /** Cross-org management — only the platform owner provisions organizations. */
+@ApiTags('organizations')
+@ApiBearerAuth('access-token')
 @Controller('organizations')
 @Roles(AppRole.PlatformAdmin)
 export class OrganizationsController {

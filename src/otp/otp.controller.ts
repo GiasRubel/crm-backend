@@ -1,9 +1,12 @@
 import { Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { OtpService } from './otp.service';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { KeycloakJwtPayload } from '../auth/interfaces/keycloak-jwt-payload.interface';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 
+@ApiTags('auth/otp')
+@ApiBearerAuth('access-token')
 @Controller('auth/otp')
 export class OtpController {
   constructor(private readonly otpService: OtpService) {}

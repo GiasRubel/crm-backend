@@ -10,6 +10,7 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { Types } from 'mongoose';
 import { CurrentOrg } from '../auth/decorators/current-org.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -23,6 +24,7 @@ import { KbQueryDto, PublicKbQueryDto } from './dto/kb-query.dto';
 import { UpdateKbArticleDto } from './dto/update-kb-article.dto';
 import { KbService } from './kb.service';
 
+@ApiTags('kb')
 @Controller('kb')
 export class KbController {
   constructor(private readonly kbService: KbService) {}
@@ -54,6 +56,7 @@ export class KbController {
   // ── Staff wiki management ───────────────────────────────────────────────
 
   @Post()
+  @ApiBearerAuth('access-token')
   @Roles(AppRole.Admin, AppRole.Administrator, AppRole.User)
   create(
     @Body() dto: CreateKbArticleDto,
@@ -64,6 +67,7 @@ export class KbController {
   }
 
   @Get()
+  @ApiBearerAuth('access-token')
   @Roles(AppRole.Admin, AppRole.Administrator, AppRole.User)
   findAll(
     @Query() query: KbQueryDto,
@@ -73,12 +77,14 @@ export class KbController {
   }
 
   @Get('stats')
+  @ApiBearerAuth('access-token')
   @Roles(AppRole.Admin, AppRole.Administrator, AppRole.User)
   getStats(@CurrentOrg() organizationId: Types.ObjectId) {
     return this.kbService.getStats(organizationId);
   }
 
   @Get(':id')
+  @ApiBearerAuth('access-token')
   @Roles(AppRole.Admin, AppRole.Administrator, AppRole.User)
   findOne(
     @Param('id') id: string,
@@ -88,6 +94,7 @@ export class KbController {
   }
 
   @Patch(':id')
+  @ApiBearerAuth('access-token')
   @Roles(AppRole.Admin, AppRole.Administrator, AppRole.User)
   update(
     @Param('id') id: string,
@@ -99,6 +106,7 @@ export class KbController {
   }
 
   @Delete(':id')
+  @ApiBearerAuth('access-token')
   @Roles(AppRole.Admin, AppRole.Administrator)
   @HttpCode(HttpStatus.NO_CONTENT)
   remove(

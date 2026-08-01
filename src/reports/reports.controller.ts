@@ -10,6 +10,7 @@ import {
   Put,
   Query,
 } from '@nestjs/common';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { Types } from 'mongoose';
 import { CurrentOrg } from '../auth/decorators/current-org.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -21,6 +22,8 @@ import { RunReportDto } from './dto/run-report.dto';
 import { RunSavedReportDto } from './dto/run-saved-report.dto';
 import { ReportsService } from './reports.service';
 
+@ApiTags('reports')
+@ApiBearerAuth('access-token')
 @Controller('reports')
 export class ReportsController {
   constructor(private readonly reportsService: ReportsService) {}

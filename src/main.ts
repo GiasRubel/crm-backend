@@ -2,6 +2,7 @@ import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { ConfigService } from '@nestjs/config';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import * as express from 'express';
 
 async function bootstrap() {
@@ -39,6 +40,18 @@ async function bootstrap() {
     res.setHeader('Pragma', 'no-cache');
     next();
   });
+
+  const swaggerConfig = new DocumentBuilder()
+    .setTitle('CRM API')
+    .setDescription('REST API for the CRM backend')
+    .setVersion('1.0')
+    .addBearerAuth(
+      { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
+      'access-token',
+    )
+    .build();
+  const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig);
+  SwaggerModule.setup('swagger', app, swaggerDocument);
 
   const configService = app.get(ConfigService);
   const port = configService.get<number>('PORT') ?? 5000;

@@ -10,6 +10,7 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { Types } from 'mongoose';
 import { CurrentOrg } from '../auth/decorators/current-org.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -23,6 +24,8 @@ import { OpportunityQueryDto } from './dto/opportunity-query.dto';
 import { UpdateOpportunityDto } from './dto/update-opportunity.dto';
 import { OpportunitiesService } from './opportunities.service';
 
+@ApiTags('opportunities')
+@ApiBearerAuth('access-token')
 @Controller('opportunities')
 export class OpportunitiesController {
   constructor(private readonly opportunitiesService: OpportunitiesService) {}
