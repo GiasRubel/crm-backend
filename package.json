@@ -18,7 +18,11 @@
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
-    "migrate:default-org": "ts-node -r tsconfig-paths/register scripts/backfill-default-org.ts"
+    "migrate:default-org": "ts-node -r tsconfig-paths/register scripts/backfill-default-org.ts",
+    "seed": "ts-node -r tsconfig-paths/register scripts/seed/index.ts",
+    "seed:fresh": "ts-node -r tsconfig-paths/register scripts/seed/index.ts --fresh",
+    "seed:reset": "ts-node -r tsconfig-paths/register scripts/seed/index.ts --reset-only",
+    "seed:verify": "ts-node -r tsconfig-paths/register scripts/seed/index.ts --verify-only"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",
@@ -42,6 +46,7 @@
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",
     "@eslint/js": "^9.18.0",
+    "@faker-js/faker": "^10.5.0",
     "@nestjs/cli": "^11.0.0",
     "@nestjs/schematics": "^11.0.0",
     "@nestjs/testing": "^11.0.1",

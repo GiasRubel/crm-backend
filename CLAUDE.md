@@ -27,6 +27,47 @@ yarn test           # jest (*.spec.ts next to source, rootDir=src)
 yarn test:e2e       # jest --config ./test/jest-e2e.json
 ```
 
+### Demo data (`scripts/seed/`)
+
+```bash
+yarn seed          # append a demo dataset to the default organization
+yarn seed:fresh    # remove the previous seed, then seed again
+yarn seed:reset    # remove the previous seed and stop
+yarn seed:verify   # re-run the integrity checks against what's in the DB
+```
+
+Fills every module with a coherent ~18-month history for one mid-sized company:
+6 teams, 28 staff, 180 accounts, 650 contacts, 240 customers, 900 leads, 420
+opportunities, 6 000 activities, 1 400 tickets, 60 KB articles, 12 automation
+rules + ~800 runs, 15 saved reports. Takes ~50 s. Plan and rationale live in
+`SEED-DATA-PLAN.md`.
+
+- **All 28 staff get real Keycloak logins** on a shared password (`SEED_PASSWORD`,
+  default `Passw0rd!23`) so row-level visibility can be tested as an admin, a
+  rep or a support agent. The credential table prints at the end of a run.
+  10 customers also get portal logins; the rest are CRM records with synthetic
+  `keycloakId`s.
+- **It never wipes collections.** Every inserted `_id` and provisioned Keycloak
+  id is recorded in a `seed_manifest` document, and `--fresh` deletes exactly
+  those — pre-existing users, the organization and the subscription survive.
+  Ticket counters are deliberately *not* rolled back (ticket numbers are
+  human-visible and must stay monotonic).
+- **Writes bypass the feature services on purpose**, using
+  `insertMany(docs, { timestamps: false })`: services would stamp
+  `createdAt = now` and destroy the history, and would emit `CrmEventBus`
+  events that fire the automation engine mid-seed. `scripts/seed/verify.ts` is
+  the compensating control — 58 assertions covering score/probability
+  derivation, SLA timestamp ordering, owner↔team consistency and referential
+  integrity. It runs automatically after every seed and exits non-zero on
+  failure.
+- Randomness is seeded (`RNG_SEED` in `config.ts`), so a run is reproducible
+  within a day. Volumes and mixes are all in `scripts/seed/config.ts`.
+
+Gotcha when writing new generators: inside a Mongo `$expr`, `{ $ne: ['$f', null] }`
+is **not** "field is present" — a missing field compares unequal to null, so
+every document without the field matches. Use `{ $gt: ['$f', null] }` (the
+`present()` helper in `verify.ts`).
+
 Runs on `PORT` (`.env` sets **5000**). CORS is locked to `FRONTEND_URL`
 (`http://localhost:3001`). Docker Compose (`docker-compose.yml`) brings up Mongo +
 Keycloak locally. See `KEYCLOAK-SETUP.md` for realm/client setup.
