@@ -5,6 +5,7 @@ import {
   IsEmail,
   IsIn,
   IsNotEmpty,
+  IsObject,
   IsOptional,
   IsString,
   Matches,
@@ -120,4 +121,9 @@ export class UpdateContactDto {
   @IsOptional()
   @MaxLength(2000)
   notes?: string;
+
+  /** Admin-defined field values, keyed by CustomFieldDefinition.key. Merged into existing values. */
+  @IsObject()
+  @IsOptional()
+  customFields?: Record<string, unknown>;
 }

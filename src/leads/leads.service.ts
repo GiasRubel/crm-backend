@@ -15,6 +15,7 @@ import {
   diffFields,
   omitFields,
 } from '../audit/audit.service';
+import { CustomFieldsService } from '../custom-fields/custom-fields.service';
 import { CustomersService } from '../customers/customers.service';
 import { CrmEventBus } from '../events/crm-event-bus.service';
 import { OpportunitiesService } from '../opportunities/opportunities.service';
@@ -66,6 +67,7 @@ const LEAD_AUDIT_FIELDS = [
   'source',
   'estimatedValue',
   'status',
+  'customFields',
 ];
 
 @Injectable()
@@ -82,6 +84,7 @@ export class LeadsService {
     private readonly organizationsService: OrganizationsService,
     private readonly eventBus: CrmEventBus,
     private readonly auditService: AuditService,
+    private readonly customFieldsService: CustomFieldsService,
   ) {}
 
   /** Publish a lead domain event for the automation engine. */
@@ -113,6 +116,12 @@ export class LeadsService {
       dto.assignedToId,
       dto.assignedTeamId,
     );
+    const customFields = await this.customFieldsService.validateAndMerge(
+      'lead',
+      undefined,
+      dto.customFields,
+      organizationId,
+    );
 
     const lead = await this.leadModel.create({
       organizationId,
@@ -126,6 +135,7 @@ export class LeadsService {
       source: dto.source ?? 'manual',
       estimatedValue: dto.estimatedValue,
       createdBy,
+      customFields,
       ...assignment,
     });
 
@@ -415,6 +425,14 @@ export class LeadsService {
     if (dto.estimatedValue !== undefined)
       lead.estimatedValue = dto.estimatedValue;
     if (dto.status !== undefined) lead.status = dto.status;
+    if (dto.customFields !== undefined) {
+      lead.customFields = await this.customFieldsService.validateAndMerge(
+        'lead',
+        lead.customFields,
+        dto.customFields,
+        organizationId,
+      );
+    }
 
     await lead.save();
     this.logger.log(`Lead updated: ${id} (status=${lead.status})`);

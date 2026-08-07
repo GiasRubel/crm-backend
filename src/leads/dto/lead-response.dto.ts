@@ -35,6 +35,7 @@ export class LeadResponseDto {
   convertedOpportunityId: string | null;
   convertedAt: string | null;
   convertedBy: string | null;
+  customFields: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
 }

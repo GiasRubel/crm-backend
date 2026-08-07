@@ -4,6 +4,7 @@ import {
   IsMongoId,
   IsNotEmpty,
   IsNumber,
+  IsObject,
   IsOptional,
   IsString,
   Matches,
@@ -71,4 +72,9 @@ export class CreateLeadDto {
   @IsMongoId()
   @IsOptional()
   assignedTeamId?: string;
+
+  /** Admin-defined field values, keyed by CustomFieldDefinition.key. */
+  @IsObject()
+  @IsOptional()
+  customFields?: Record<string, unknown>;
 }

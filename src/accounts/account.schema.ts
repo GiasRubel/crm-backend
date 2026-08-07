@@ -93,6 +93,10 @@ export class Account {
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Team', index: true })
   assignedTeamId?: Types.ObjectId;
 
+  /** Admin-defined field values, keyed by CustomFieldDefinition.key. */
+  @Prop({ type: MongooseSchema.Types.Mixed, default: {} })
+  customFields?: Record<string, unknown>;
+
   // Managed by { timestamps: true }
   createdAt?: Date;
   updatedAt?: Date;

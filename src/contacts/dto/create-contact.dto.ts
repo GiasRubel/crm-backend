@@ -6,6 +6,7 @@ import {
   IsIn,
   IsMongoId,
   IsNotEmpty,
+  IsObject,
   IsOptional,
   IsString,
   Matches,
@@ -129,4 +130,9 @@ export class CreateContactDto {
   @IsMongoId()
   @IsOptional()
   assignedTeamId?: string;
+
+  /** Admin-defined field values, keyed by CustomFieldDefinition.key. */
+  @IsObject()
+  @IsOptional()
+  customFields?: Record<string, unknown>;
 }

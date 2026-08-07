@@ -4,6 +4,7 @@ import {
   IsIn,
   IsMongoId,
   IsNotEmpty,
+  IsObject,
   IsOptional,
   IsString,
   MaxLength,
@@ -42,4 +43,9 @@ export class UpdateTicketDto {
   @ArrayMaxSize(10)
   @IsOptional()
   relatedArticleIds?: string[];
+
+  /** Admin-defined field values, keyed by CustomFieldDefinition.key. Merged into existing values. */
+  @IsObject()
+  @IsOptional()
+  customFields?: Record<string, unknown>;
 }

@@ -2,6 +2,7 @@ import {
   IsEmail,
   IsEnum,
   IsNotEmpty,
+  IsObject,
   IsOptional,
   IsString,
   Matches,
@@ -52,4 +53,9 @@ export class UpdateCustomerDto {
   @IsEnum(['active', 'inactive', 'prospect'])
   @IsOptional()
   status?: 'active' | 'inactive' | 'prospect';
+
+  /** Admin-defined field values, keyed by CustomFieldDefinition.key. Merged into existing values. */
+  @IsObject()
+  @IsOptional()
+  customFields?: Record<string, unknown>;
 }

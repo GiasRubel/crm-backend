@@ -63,6 +63,7 @@ export function toTicketResponseDto(
     assignedTeamId,
     assignedTeamName:
       (assignedTeamId && data.teamNames?.get(assignedTeamId)) || null,
+    customFields: ticket.customFields ?? {},
     createdAt: ticket.createdAt?.toISOString() ?? '',
     updatedAt: ticket.updatedAt?.toISOString() ?? '',
   };

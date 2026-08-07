@@ -55,6 +55,7 @@ export function toOpportunityResponseDto(
     assignedTeamId,
     assignedTeamName:
       (assignedTeamId && names.teamNames?.get(assignedTeamId)) || null,
+    customFields: opportunity.customFields ?? {},
     createdAt: opportunity.createdAt?.toISOString() ?? '',
     updatedAt: opportunity.updatedAt?.toISOString() ?? '',
   };

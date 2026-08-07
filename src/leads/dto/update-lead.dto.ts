@@ -3,6 +3,7 @@ import {
   IsIn,
   IsNotEmpty,
   IsNumber,
+  IsObject,
   IsOptional,
   IsString,
   Matches,
@@ -70,4 +71,9 @@ export class UpdateLeadDto {
   @Min(0)
   @IsOptional()
   estimatedValue?: number;
+
+  /** Admin-defined field values, keyed by CustomFieldDefinition.key. Merged into existing values. */
+  @IsObject()
+  @IsOptional()
+  customFields?: Record<string, unknown>;
 }

@@ -155,6 +155,10 @@ export class Lead {
   @Prop()
   convertedBy?: string;
 
+  /** Admin-defined field values, keyed by CustomFieldDefinition.key. */
+  @Prop({ type: MongooseSchema.Types.Mixed, default: {} })
+  customFields?: Record<string, unknown>;
+
   // Managed by { timestamps: true }
   createdAt?: Date;
   updatedAt?: Date;

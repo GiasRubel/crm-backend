@@ -58,6 +58,7 @@ export function toLeadResponseDto(
     convertedOpportunityId: lead.convertedOpportunityId?.toString() ?? null,
     convertedAt: lead.convertedAt?.toISOString() ?? null,
     convertedBy: lead.convertedBy ?? null,
+    customFields: lead.customFields ?? {},
     createdAt: lead.createdAt?.toISOString() ?? '',
     updatedAt: lead.updatedAt?.toISOString() ?? '',
   };

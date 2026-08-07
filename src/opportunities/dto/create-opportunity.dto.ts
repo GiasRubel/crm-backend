@@ -4,6 +4,7 @@ import {
   IsMongoId,
   IsNotEmpty,
   IsNumber,
+  IsObject,
   IsOptional,
   IsString,
   Max,
@@ -68,4 +69,9 @@ export class CreateOpportunityDto {
   @IsMongoId()
   @IsOptional()
   accountId?: string;
+
+  /** Admin-defined field values, keyed by CustomFieldDefinition.key. */
+  @IsObject()
+  @IsOptional()
+  customFields?: Record<string, unknown>;
 }

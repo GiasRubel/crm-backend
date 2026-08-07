@@ -33,6 +33,7 @@ export function toCustomerResponseDto(
     assignedTeamId,
     assignedTeamName:
       (assignedTeamId && names.teamNames?.get(assignedTeamId)) || null,
+    customFields: customer.customFields ?? {},
     createdAt: customer.createdAt?.toISOString() ?? '',
     updatedAt: customer.updatedAt?.toISOString() ?? '',
   };

@@ -10,6 +10,7 @@ import {
 import { InjectModel } from '@nestjs/mongoose';
 import { isValidObjectId, Model, Types } from 'mongoose';
 import { AuditActor, AuditService, diffFields } from '../audit/audit.service';
+import { CustomFieldsService } from '../custom-fields/custom-fields.service';
 import { CrmEventBus } from '../events/crm-event-bus.service';
 import { KeycloakAdminService } from '../keycloak-admin/keycloak-admin.service';
 import { TeamDocument } from '../teams/team.schema';
@@ -38,6 +39,7 @@ const CUSTOMER_AUDIT_FIELDS = [
   'phone',
   'company',
   'status',
+  'customFields',
 ];
 
 @Injectable()
@@ -52,6 +54,7 @@ export class CustomersService {
     private readonly teamsService: TeamsService,
     private readonly eventBus: CrmEventBus,
     private readonly auditService: AuditService,
+    private readonly customFieldsService: CustomFieldsService,
   ) {}
 
   async create(
@@ -108,6 +111,12 @@ export class CustomersService {
       createdUserDoc = true;
 
       const status = dto.status ?? 'active';
+      const customFields = await this.customFieldsService.validateAndMerge(
+        'customer',
+        undefined,
+        dto.customFields,
+        organizationId,
+      );
 
       // Create detailed customer profile document
       createdCustomerDoc = await this.customerModel.create({
@@ -122,6 +131,7 @@ export class CustomersService {
         notes: dto.notes?.trim(),
         status,
         createdBy,
+        customFields,
         ...assignment,
       });
 
@@ -409,6 +419,14 @@ export class CustomersService {
       updates.status = dto.status;
       // Lifecycle drives sign-in ability: inactive customers are locked out of Keycloak
       keycloakUpdates.enabled = dto.status !== 'inactive';
+    }
+    if (dto.customFields !== undefined) {
+      updates.customFields = await this.customFieldsService.validateAndMerge(
+        'customer',
+        customer.customFields,
+        dto.customFields,
+        organizationId,
+      );
     }
 
     // 1. Sync identity/lifecycle fields to Keycloak Identity Provider

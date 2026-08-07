@@ -41,6 +41,7 @@ export function toAccountResponseDto(
     assignedTeamId,
     assignedTeamName:
       (assignedTeamId && data.teamNames?.get(assignedTeamId)) || null,
+    customFields: account.customFields ?? {},
     createdAt: account.createdAt?.toISOString() ?? '',
     updatedAt: account.updatedAt?.toISOString() ?? '',
   };

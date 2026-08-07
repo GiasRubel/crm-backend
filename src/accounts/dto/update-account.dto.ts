@@ -3,6 +3,7 @@ import {
   IsIn,
   IsNotEmpty,
   IsNumber,
+  IsObject,
   IsOptional,
   IsString,
   IsUrl,
@@ -75,4 +76,9 @@ export class UpdateAccountDto {
   @IsIn(ACCOUNT_STATUSES)
   @IsOptional()
   status?: AccountStatus;
+
+  /** Admin-defined field values, keyed by CustomFieldDefinition.key. Merged into existing values. */
+  @IsObject()
+  @IsOptional()
+  customFields?: Record<string, unknown>;
 }

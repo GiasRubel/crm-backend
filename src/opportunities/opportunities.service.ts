@@ -14,6 +14,7 @@ import {
   diffFields,
   omitFields,
 } from '../audit/audit.service';
+import { CustomFieldsService } from '../custom-fields/custom-fields.service';
 import { CustomersService } from '../customers/customers.service';
 import { CrmEventBus } from '../events/crm-event-bus.service';
 import { TeamDocument } from '../teams/team.schema';
@@ -49,7 +50,13 @@ function escapeRegExp(input: string): string {
 const BOARD_COLUMN_LIMIT = 100;
 
 /** Top-level fields tracked for the update-diff audit entry. */
-const OPPORTUNITY_AUDIT_FIELDS = ['name', 'amount', 'probability', 'accountId'];
+const OPPORTUNITY_AUDIT_FIELDS = [
+  'name',
+  'amount',
+  'probability',
+  'accountId',
+  'customFields',
+];
 
 @Injectable()
 export class OpportunitiesService {
@@ -64,6 +71,7 @@ export class OpportunitiesService {
     private readonly accountsService: AccountsService,
     private readonly eventBus: CrmEventBus,
     private readonly auditService: AuditService,
+    private readonly customFieldsService: CustomFieldsService,
   ) {}
 
   /** Publish an opportunity domain event for the automation engine. */
@@ -108,12 +116,19 @@ export class OpportunitiesService {
     );
 
     const stage = dto.stage ?? 'discovery';
+    const customFields = await this.customFieldsService.validateAndMerge(
+      'opportunity',
+      undefined,
+      dto.customFields,
+      organizationId,
+    );
 
     const opportunity = await this.opportunityModel.create({
       organizationId,
       name: dto.name.trim(),
       customerId: customer._id,
       leadId: dto.leadId ? new Types.ObjectId(dto.leadId) : undefined,
+      customFields,
       accountId: accountObjectId,
       amount: dto.amount,
       stage,
@@ -389,6 +404,16 @@ export class OpportunitiesService {
         }
         opportunity.accountId = account._id;
       }
+    }
+
+    if (dto.customFields !== undefined) {
+      opportunity.customFields =
+        await this.customFieldsService.validateAndMerge(
+          'opportunity',
+          opportunity.customFields,
+          dto.customFields,
+          organizationId,
+        );
     }
 
     await opportunity.save();

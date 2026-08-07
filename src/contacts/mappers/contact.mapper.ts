@@ -59,6 +59,7 @@ export function toContactResponseDto(
     assignedTeamId,
     assignedTeamName:
       (assignedTeamId && names.teamNames?.get(assignedTeamId)) || null,
+    customFields: contact.customFields ?? {},
     createdAt: contact.createdAt?.toISOString() ?? '',
     updatedAt: contact.updatedAt?.toISOString() ?? '',
   };

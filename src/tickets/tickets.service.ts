@@ -13,6 +13,7 @@ import {
   diffFields,
   omitFields,
 } from '../audit/audit.service';
+import { CustomFieldsService } from '../custom-fields/custom-fields.service';
 import { CustomersService } from '../customers/customers.service';
 import { CrmEventBus } from '../events/crm-event-bus.service';
 import { KbService } from '../kb/kb.service';
@@ -60,6 +61,7 @@ export class TicketsService {
     private readonly kbService: KbService,
     private readonly eventBus: CrmEventBus,
     private readonly auditService: AuditService,
+    private readonly customFieldsService: CustomFieldsService,
   ) {}
 
   // ── Staff: create / read ────────────────────────────────────────────────
@@ -78,6 +80,12 @@ export class TicketsService {
       dto.assignedToId,
       dto.assignedTeamId,
     );
+    const customFields = await this.customFieldsService.validateAndMerge(
+      'ticket',
+      undefined,
+      dto.customFields,
+      organizationId,
+    );
 
     const ticket = await this.ticketModel.create({
       organizationId,
@@ -88,6 +96,7 @@ export class TicketsService {
       priority: dto.priority ?? 'normal',
       customerId: customer._id,
       createdBy,
+      customFields,
       ...assignment,
     });
 
@@ -311,6 +320,15 @@ export class TicketsService {
       }
       ticket.relatedArticleIds = dto.relatedArticleIds.map(
         (a) => new Types.ObjectId(a),
+      );
+    }
+
+    if (dto.customFields !== undefined) {
+      ticket.customFields = await this.customFieldsService.validateAndMerge(
+        'ticket',
+        ticket.customFields,
+        dto.customFields,
+        organizationId,
       );
     }
 

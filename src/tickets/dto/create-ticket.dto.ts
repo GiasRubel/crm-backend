@@ -2,6 +2,7 @@ import {
   IsIn,
   IsMongoId,
   IsNotEmpty,
+  IsObject,
   IsOptional,
   IsString,
   MaxLength,
@@ -42,6 +43,11 @@ export class CreateTicketDto {
   @IsMongoId()
   @IsOptional()
   assignedTeamId?: string;
+
+  /** Admin-defined field values, keyed by CustomFieldDefinition.key. */
+  @IsObject()
+  @IsOptional()
+  customFields?: Record<string, unknown>;
 }
 
 /** Portal customers raise tickets for themselves — no routing controls. */

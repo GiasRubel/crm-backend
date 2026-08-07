@@ -15,6 +15,7 @@ import {
   diffFields,
   omitFields,
 } from '../audit/audit.service';
+import { CustomFieldsService } from '../custom-fields/custom-fields.service';
 import { CustomersService } from '../customers/customers.service';
 import { CrmEventBus } from '../events/crm-event-bus.service';
 import { TeamDocument } from '../teams/team.schema';
@@ -52,6 +53,7 @@ const CONTACT_AUDIT_FIELDS = [
   'phoneOptIn',
   'smsOptIn',
   'doNotContact',
+  'customFields',
 ];
 
 @Injectable()
@@ -67,6 +69,7 @@ export class ContactsService {
     private readonly customersService: CustomersService,
     private readonly eventBus: CrmEventBus,
     private readonly auditService: AuditService,
+    private readonly customFieldsService: CustomFieldsService,
   ) {}
 
   // ── Create ──────────────────────────────────────────────────────────────
@@ -95,6 +98,12 @@ export class ContactsService {
       dto.assignedToId,
       dto.assignedTeamId,
     );
+    const customFields = await this.customFieldsService.validateAndMerge(
+      'contact',
+      undefined,
+      dto.customFields,
+      organizationId,
+    );
 
     const contact = await this.contactModel.create({
       organizationId,
@@ -119,6 +128,7 @@ export class ContactsService {
       doNotContact: dto.doNotContact ?? false,
       notes: dto.notes?.trim(),
       createdBy,
+      customFields,
       ...assignment,
     });
 
@@ -353,6 +363,14 @@ export class ContactsService {
     if (dto.smsOptIn !== undefined) contact.smsOptIn = dto.smsOptIn;
     if (dto.doNotContact !== undefined) contact.doNotContact = dto.doNotContact;
     if (dto.notes !== undefined) contact.notes = dto.notes.trim();
+    if (dto.customFields !== undefined) {
+      contact.customFields = await this.customFieldsService.validateAndMerge(
+        'contact',
+        contact.customFields,
+        dto.customFields,
+        organizationId,
+      );
+    }
 
     await contact.save();
 

@@ -10,6 +10,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { isValidObjectId, Model, Types } from 'mongoose';
 import { AuditActor, AuditService, diffFields } from '../audit/audit.service';
 import { Contact, ContactDocument } from '../contacts/contact.schema';
+import { CustomFieldsService } from '../custom-fields/custom-fields.service';
 import {
   CLOSED_STAGES,
   Opportunity,
@@ -47,6 +48,7 @@ const ACCOUNT_AUDIT_FIELDS = [
   'size',
   'annualRevenue',
   'status',
+  'customFields',
 ];
 
 @Injectable()
@@ -67,6 +69,7 @@ export class AccountsService {
     private readonly usersService: UsersService,
     private readonly teamsService: TeamsService,
     private readonly auditService: AuditService,
+    private readonly customFieldsService: CustomFieldsService,
   ) {}
 
   // ── Create / update ─────────────────────────────────────────────────────
@@ -82,6 +85,12 @@ export class AccountsService {
       dto.assignedToId,
       dto.assignedTeamId,
     );
+    const customFields = await this.customFieldsService.validateAndMerge(
+      'account',
+      undefined,
+      dto.customFields,
+      organizationId,
+    );
 
     const account = await this.accountModel.create({
       organizationId,
@@ -96,6 +105,7 @@ export class AccountsService {
       description: dto.description?.trim(),
       status: dto.status ?? 'prospect',
       createdBy,
+      customFields,
       ...assignment,
     });
 
@@ -141,6 +151,14 @@ export class AccountsService {
     if (dto.description !== undefined)
       account.description = dto.description.trim();
     if (dto.status !== undefined) account.status = dto.status;
+    if (dto.customFields !== undefined) {
+      account.customFields = await this.customFieldsService.validateAndMerge(
+        'account',
+        account.customFields,
+        dto.customFields,
+        organizationId,
+      );
+    }
 
     await account.save();
     this.logger.log(`Account updated: ${id}`);
