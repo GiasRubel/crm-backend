@@ -32,6 +32,7 @@ export const AUDIT_ENTITY_TYPES = [
   'organization',
   'auth',
   'custom_field_definition',
+  'attachment',
 ] as const;
 export type AuditEntityType = (typeof AUDIT_ENTITY_TYPES)[number];
 

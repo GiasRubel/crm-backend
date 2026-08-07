@@ -3,6 +3,9 @@
 /node_modules
 /build
 
+# Uploaded attachments (local disk storage — not source-controlled)
+/uploads
+
 # Logs
 logs
 *.log
