@@ -18,6 +18,7 @@ import { CustomersService } from '../customers/customers.service';
 import { CrmEventBus } from '../events/crm-event-bus.service';
 import { toCsv } from '../import-export/csv.util';
 import { KbService } from '../kb/kb.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { TeamDocument } from '../teams/team.schema';
 import { TeamsService } from '../teams/teams.service';
 import { AppRole } from '../users/app-role.enum';
@@ -66,6 +67,7 @@ export class TicketsService {
     private readonly eventBus: CrmEventBus,
     private readonly auditService: AuditService,
     private readonly customFieldsService: CustomFieldsService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   // ── Staff: create / read ────────────────────────────────────────────────
@@ -412,6 +414,16 @@ export class TicketsService {
     }
 
     await ticket.save();
+    void this.notificationsService.notify({
+      organizationId,
+      recipientId: ticket.assignedToId,
+      actorId: requesterKeycloakId,
+      type: 'comment',
+      title: `New comment on ${ticket.number}`,
+      body: dto.body.trim().slice(0, 200),
+      entityType: 'ticket',
+      entityId: ticket._id,
+    });
     return this.mapOne(ticket);
   }
 
@@ -503,6 +515,18 @@ export class TicketsService {
         'assignedTeamId',
       ]),
     });
+    if (dto.assignedToId) {
+      void this.notificationsService.notify({
+        organizationId,
+        recipientId: updated.assignedToId,
+        actorId: actor.id,
+        type: 'assignment',
+        title: 'Ticket assigned to you',
+        body: `${updated.number} — ${updated.subject}`,
+        entityType: 'ticket',
+        entityId: updated._id,
+      });
+    }
     return this.mapOne(updated);
   }
 
@@ -611,6 +635,16 @@ export class TicketsService {
     }
 
     await ticket.save();
+    void this.notificationsService.notify({
+      organizationId: ticket.organizationId,
+      recipientId: ticket.assignedToId,
+      actorId: customerKeycloakId,
+      type: 'comment',
+      title: `New customer reply on ${ticket.number}`,
+      body: dto.body.trim().slice(0, 200),
+      entityType: 'ticket',
+      entityId: ticket._id,
+    });
     return this.mapOne(ticket, { forCustomer: true });
   }
 

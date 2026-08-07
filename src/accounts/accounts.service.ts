@@ -19,6 +19,7 @@ import {
   MAX_IMPORT_ROWS,
   runImport,
 } from '../import-export/import-result.dto';
+import { NotificationsService } from '../notifications/notifications.service';
 import {
   CLOSED_STAGES,
   Opportunity,
@@ -81,6 +82,7 @@ export class AccountsService {
     private readonly teamsService: TeamsService,
     private readonly auditService: AuditService,
     private readonly customFieldsService: CustomFieldsService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   // ── Create / update ─────────────────────────────────────────────────────
@@ -491,6 +493,18 @@ export class AccountsService {
         'assignedTeamId',
       ]),
     });
+    if (dto.assignedToId) {
+      void this.notificationsService.notify({
+        organizationId,
+        recipientId: updated.assignedToId,
+        actorId: actor.id,
+        type: 'assignment',
+        title: 'Account assigned to you',
+        body: updated.name,
+        entityType: 'account',
+        entityId: updated._id,
+      });
+    }
     return this.mapOne(updated);
   }
 

@@ -26,6 +26,7 @@ import {
 import { parseCsvToRecords, toCsv } from '../import-export/csv.util';
 import { CustomersService } from '../customers/customers.service';
 import { CrmEventBus } from '../events/crm-event-bus.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { OpportunitiesService } from '../opportunities/opportunities.service';
 import { OrganizationsService } from '../organizations/organizations.service';
 import { TeamDocument } from '../teams/team.schema';
@@ -96,6 +97,7 @@ export class LeadsService {
     private readonly eventBus: CrmEventBus,
     private readonly auditService: AuditService,
     private readonly customFieldsService: CustomFieldsService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   /** Publish a lead domain event for the automation engine. */
@@ -620,6 +622,18 @@ export class LeadsService {
         'assignedTeamId',
       ]),
     });
+    if (dto.assignedToId) {
+      void this.notificationsService.notify({
+        organizationId,
+        recipientId: updated.assignedToId,
+        actorId: actor.id,
+        type: 'assignment',
+        title: 'Lead assigned to you',
+        body: `${updated.firstName} ${updated.lastName}`,
+        entityType: 'lead',
+        entityId: updated._id,
+      });
+    }
     return this.mapOne(updated);
   }
 

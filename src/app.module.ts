@@ -26,6 +26,8 @@ import { LicensingModule } from './licensing/licensing.module';
 import { AuditModule } from './audit/audit.module';
 import { CustomFieldsModule } from './custom-fields/custom-fields.module';
 import { AttachmentsModule } from './attachments/attachments.module';
+import { NotificationsModule } from './notifications/notifications.module';
+import { SearchModule } from './search/search.module';
 
 @Module({
   imports: [
@@ -41,6 +43,7 @@ import { AttachmentsModule } from './attachments/attachments.module';
     AuditModule, // Global — AuditService injectable everywhere
     CustomFieldsModule, // Global — CustomFieldsService injectable everywhere
     AttachmentsModule, // Global — AttachmentsService injectable everywhere
+    NotificationsModule, // Global — NotificationsService injectable everywhere
     LicensingModule, // Must run before AuthModule: gates the whole API on activation
     AuthModule,
     UsersModule,
@@ -59,6 +62,7 @@ import { AttachmentsModule } from './attachments/attachments.module';
     TicketsModule,
     AutomationsModule,
     ReportsModule,
+    SearchModule,
   ],
   controllers: [AppController],
   providers: [AppService],

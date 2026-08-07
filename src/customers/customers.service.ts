@@ -12,6 +12,7 @@ import { isValidObjectId, Model, Types } from 'mongoose';
 import { AuditActor, AuditService, diffFields } from '../audit/audit.service';
 import { CustomFieldsService } from '../custom-fields/custom-fields.service';
 import { CrmEventBus } from '../events/crm-event-bus.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { toCsv } from '../import-export/csv.util';
 import { KeycloakAdminService } from '../keycloak-admin/keycloak-admin.service';
 import { TeamDocument } from '../teams/team.schema';
@@ -59,6 +60,7 @@ export class CustomersService {
     private readonly eventBus: CrmEventBus,
     private readonly auditService: AuditService,
     private readonly customFieldsService: CustomFieldsService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   async create(
@@ -587,6 +589,18 @@ export class CustomersService {
         'assignedTeamId',
       ]),
     });
+    if (dto.assignedToId) {
+      void this.notificationsService.notify({
+        organizationId,
+        recipientId: updated.assignedToId,
+        actorId: actor.id,
+        type: 'assignment',
+        title: 'Customer assigned to you',
+        body: `${updated.firstName} ${updated.lastName}`,
+        entityType: 'customer',
+        entityId: updated._id,
+      });
+    }
     return this.mapOne(updated);
   }
 

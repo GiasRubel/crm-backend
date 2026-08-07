@@ -17,6 +17,7 @@ import {
 import { CustomFieldsService } from '../custom-fields/custom-fields.service';
 import { CustomersService } from '../customers/customers.service';
 import { CrmEventBus } from '../events/crm-event-bus.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { toCsv } from '../import-export/csv.util';
 import { TeamDocument } from '../teams/team.schema';
 import { TeamsService } from '../teams/teams.service';
@@ -76,6 +77,7 @@ export class OpportunitiesService {
     private readonly eventBus: CrmEventBus,
     private readonly auditService: AuditService,
     private readonly customFieldsService: CustomFieldsService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   /** Publish an opportunity domain event for the automation engine. */
@@ -611,6 +613,18 @@ export class OpportunitiesService {
         'assignedTeamId',
       ]),
     });
+    if (dto.assignedToId) {
+      void this.notificationsService.notify({
+        organizationId,
+        recipientId: updated.assignedToId,
+        actorId: actor.id,
+        type: 'assignment',
+        title: 'Opportunity assigned to you',
+        body: updated.name,
+        entityType: 'opportunity',
+        entityId: updated._id,
+      });
+    }
     return this.mapOne(updated);
   }
 

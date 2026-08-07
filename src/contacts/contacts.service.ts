@@ -26,6 +26,7 @@ import {
 } from '../import-export/import-result.dto';
 import { CustomersService } from '../customers/customers.service';
 import { CrmEventBus } from '../events/crm-event-bus.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { TeamDocument } from '../teams/team.schema';
 import { TeamsService } from '../teams/teams.service';
 import { AppRole } from '../users/app-role.enum';
@@ -81,6 +82,7 @@ export class ContactsService {
     private readonly eventBus: CrmEventBus,
     private readonly auditService: AuditService,
     private readonly customFieldsService: CustomFieldsService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   // ── Create ──────────────────────────────────────────────────────────────
@@ -534,6 +536,18 @@ export class ContactsService {
         'assignedTeamId',
       ]),
     });
+    if (dto.assignedToId) {
+      void this.notificationsService.notify({
+        organizationId,
+        recipientId: updated.assignedToId,
+        actorId: actor.id,
+        type: 'assignment',
+        title: 'Contact assigned to you',
+        body: `${updated.firstName} ${updated.lastName}`,
+        entityType: 'contact',
+        entityId: updated._id,
+      });
+    }
     return this.mapOne(updated);
   }
 
