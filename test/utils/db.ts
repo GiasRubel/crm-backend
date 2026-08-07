@@ -33,6 +33,7 @@ export async function seedOrganization(
     name: overrides.name ?? `Test Org ${orgSlugCounter}`,
     slug: overrides.slug ?? `test-org-${orgSlugCounter}`,
     status: overrides.status ?? 'active',
+    authProvider: overrides.authProvider ?? 'keycloak',
   });
   return doc.toObject();
 }
@@ -55,6 +56,8 @@ export async function seedUser(
     firstName: overrides.firstName ?? 'Test',
     lastName: overrides.lastName ?? 'User',
     role,
+    passwordHash: overrides.passwordHash,
+    tokenVersion: overrides.tokenVersion ?? 0,
   });
   return doc.toObject();
 }

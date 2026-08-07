@@ -9,6 +9,7 @@ export function toOrganizationResponseDto(
     name: organization.name,
     slug: organization.slug,
     status: organization.status,
+    authProvider: organization.authProvider,
     createdAt: organization.createdAt?.toISOString() ?? '',
     updatedAt: organization.updatedAt?.toISOString() ?? '',
   };

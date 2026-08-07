@@ -1,5 +1,6 @@
 import {
   IsEmail,
+  IsIn,
   IsInt,
   IsNotEmpty,
   IsOptional,
@@ -8,6 +9,8 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
+import { ORGANIZATION_AUTH_PROVIDERS } from '../organization.schema';
+import type { OrganizationAuthProvider } from '../organization.schema';
 
 export class ProvisionOrganizationDto {
   @IsString()
@@ -45,4 +48,9 @@ export class ProvisionOrganizationDto {
   @Min(1)
   @IsOptional()
   trialDays?: number;
+
+  /** Identity provider for this org's users. Defaults to 'keycloak' if omitted. */
+  @IsIn(ORGANIZATION_AUTH_PROVIDERS)
+  @IsOptional()
+  authProvider?: OrganizationAuthProvider;
 }

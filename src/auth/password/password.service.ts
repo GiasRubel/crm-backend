@@ -2,6 +2,8 @@ import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { UsersService } from '../../users/users.service';
 import { OtpService } from '../../otp/otp.service';
 import { KeycloakAdminService } from '../../keycloak-admin/keycloak-admin.service';
+import { OrganizationsService } from '../../organizations/organizations.service';
+import { LocalAuthService } from '../local/local-auth.service';
 
 @Injectable()
 export class PasswordService {
@@ -11,6 +13,8 @@ export class PasswordService {
     private readonly usersService: UsersService,
     private readonly otpService: OtpService,
     private readonly keycloakAdminService: KeycloakAdminService,
+    private readonly organizationsService: OrganizationsService,
+    private readonly localAuthService: LocalAuthService,
   ) {}
 
   /**
@@ -51,8 +55,20 @@ export class PasswordService {
     // Throws BadRequestException / ForbiddenException on invalid/expired OTP
     await this.otpService.verify(user.keycloakId, code);
 
-    // OTP verified — update password in Keycloak
-    await this.keycloakAdminService.resetPassword(user.keycloakId, newPassword);
+    // OTP verified — update the password wherever this user's org keeps it.
+    // Also doubles as the "set your initial password" step for a freshly
+    // admin-invited local-auth user, since no password exists yet.
+    const organization = await this.organizationsService.findDocById(
+      user.organizationId,
+    );
+    if (organization?.authProvider === 'local') {
+      await this.localAuthService.setPassword(user._id, newPassword);
+    } else {
+      await this.keycloakAdminService.resetPassword(
+        user.keycloakId,
+        newPassword,
+      );
+    }
 
     this.logger.log(`Password reset successfully for ${email}`);
     return { message: 'Password reset successfully. You can now log in.' };

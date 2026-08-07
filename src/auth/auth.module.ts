@@ -7,12 +7,14 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { RolesGuard } from './guards/roles.guard';
 import { SubscriptionGuard } from '../subscriptions/guards/subscription.guard';
 import { JwtStrategy } from './strategies/jwt.strategy';
+import { LocalAuthModule } from './local/local-auth.module';
 
 @Module({
   imports: [
     PassportModule.register({ defaultStrategy: 'jwt' }),
     UsersModule,
     SubscriptionsModule,
+    LocalAuthModule,
   ],
   providers: [
     JwtStrategy,

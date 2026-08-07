@@ -31,6 +31,16 @@ export class User {
 
   @Prop({ type: String, enum: AppRole, default: AppRole.User })
   role: AppRole;
+
+  // Only set for users of a 'local' authProvider organization. Never exposed
+  // by any mapper — see users/mappers/user.mapper.ts.
+  @Prop({ type: String, select: false })
+  passwordHash?: string;
+
+  // Bumped on password change to invalidate every outstanding local-auth
+  // refresh token at once (see auth/local/local-auth.service.ts).
+  @Prop({ type: Number, default: 0 })
+  tokenVersion: number;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

@@ -2,6 +2,8 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  forwardRef,
+  Inject,
   Injectable,
   Logger,
 } from '@nestjs/common';
@@ -10,6 +12,7 @@ import { ConfigService } from '@nestjs/config';
 import { Model, Types } from 'mongoose';
 import type { KeycloakJwtPayload } from '../auth/interfaces/keycloak-jwt-payload.interface';
 import { KeycloakAdminService } from '../keycloak-admin/keycloak-admin.service';
+import { generateLocalSubjectId } from '../auth/local/local-subject-id.util';
 import { AppRole } from './app-role.enum';
 import { CreateStaffDto } from './dto/create-staff.dto';
 import { StaffUserResponseDto } from './dto/staff-user-response.dto';
@@ -21,6 +24,8 @@ import {
 import { User, UserDocument } from './users.schema';
 import { DefaultOrgService } from '../bootstrap/default-org.service';
 import { DeploymentMode, getDeploymentMode } from '../config/deployment-mode';
+import { OrganizationsService } from '../organizations/organizations.service';
+import { OtpService } from '../otp/otp.service';
 
 @Injectable()
 export class UsersService {
@@ -31,12 +36,17 @@ export class UsersService {
     private readonly configService: ConfigService,
     private readonly defaultOrgService: DefaultOrgService,
     private readonly keycloakAdminService: KeycloakAdminService,
+    @Inject(forwardRef(() => OrganizationsService))
+    private readonly organizationsService: OrganizationsService,
+    private readonly otpService: OtpService,
   ) {}
 
   /**
-   * Admin-invited teammate: creates the Keycloak identity, sends the
-   * "set your password" email, then mirrors it into Mongo. Mirrors
-   * CustomersService.create's rollback discipline.
+   * Admin-invited teammate. For a Keycloak-mode org: creates the Keycloak
+   * identity, sends the "set your password" email, then mirrors it into
+   * Mongo (mirrors CustomersService.create's rollback discipline). For a
+   * local-auth org: creates the Mongo record only and emails an OTP the
+   * invitee uses via POST /auth/password/reset to set their first password.
    */
   async createStaff(
     dto: CreateStaffDto,
@@ -46,6 +56,28 @@ export class UsersService {
 
     if (await this.findByEmail(email)) {
       throw new ConflictException('A user with this email already exists');
+    }
+
+    const organization =
+      await this.organizationsService.findDocById(organizationId);
+
+    if (organization?.authProvider === 'local') {
+      const created = await this.createLocalStaffUser(
+        email,
+        dto.firstName,
+        dto.lastName,
+        dto.role,
+        organizationId,
+      );
+      try {
+        await this.otpService.generateAndSend(created.keycloakId, email);
+      } catch (otpError) {
+        this.logger.error(
+          `Staff user created successfully, but failed to send the initial activation email to ${email}:`,
+          otpError,
+        );
+      }
+      return toStaffUserResponseDto(created);
     }
 
     const keycloakId = await this.keycloakAdminService.createUser(
@@ -155,6 +187,25 @@ export class UsersService {
     });
   }
 
+  /** Mirrors createUser, but never touches Keycloak — used for local-auth orgs. */
+  async createLocalStaffUser(
+    email: string,
+    firstName: string,
+    lastName: string,
+    role: AppRole,
+    organizationId: Types.ObjectId,
+  ): Promise<UserDocument> {
+    return this.userModel.create({
+      organizationId,
+      keycloakId: generateLocalSubjectId(),
+      email: email.trim().toLowerCase(),
+      username: email.trim().toLowerCase(),
+      firstName: firstName.trim(),
+      lastName: lastName.trim(),
+      role,
+    });
+  }
+
   async deleteByKeycloakId(keycloakId: string): Promise<void> {
     await this.userModel.deleteOne({ keycloakId }).exec();
   }
@@ -182,12 +233,15 @@ export class UsersService {
       );
     }
 
+    // Undefined (not '') when the claim is simply absent from this token —
+    // local-auth tokens deliberately carry only sub+email, and an absent
+    // claim must never be read as "the user cleared their name."
     return {
       keycloakId: payload.sub,
       email,
-      username: payload.preferred_username?.trim() ?? '',
-      firstName: payload.given_name?.trim() ?? '',
-      lastName: payload.family_name?.trim() ?? '',
+      username: payload.preferred_username?.trim(),
+      firstName: payload.given_name?.trim(),
+      lastName: payload.family_name?.trim(),
     };
   }
 
@@ -213,8 +267,8 @@ export class UsersService {
         return this.createUser(
           payload.sub,
           identity.email,
-          identity.firstName,
-          identity.lastName,
+          identity.firstName ?? '',
+          identity.lastName ?? '',
           AppRole.Admin,
           organizationId,
         );
@@ -234,11 +288,11 @@ export class UsersService {
     const updates: Partial<User> = {};
 
     if (user.email !== identity.email) updates.email = identity.email;
-    if (user.username !== identity.username)
+    if (identity.username !== undefined && user.username !== identity.username)
       updates.username = identity.username;
-    if (user.firstName !== identity.firstName)
+    if (identity.firstName !== undefined && user.firstName !== identity.firstName)
       updates.firstName = identity.firstName;
-    if (user.lastName !== identity.lastName)
+    if (identity.lastName !== undefined && user.lastName !== identity.lastName)
       updates.lastName = identity.lastName;
 
     // Nothing changed — return as-is without a DB write

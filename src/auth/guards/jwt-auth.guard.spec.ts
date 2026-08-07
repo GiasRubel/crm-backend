@@ -18,7 +18,7 @@ describe('JwtAuthGuard', () => {
     reflector = new Reflector();
     guard = new JwtAuthGuard(reflector);
     superCanActivateSpy = jest
-      .spyOn(AuthGuard('jwt').prototype, 'canActivate')
+      .spyOn(AuthGuard(['jwt', 'local-jwt']).prototype, 'canActivate')
       .mockReturnValue(true);
   });
 
