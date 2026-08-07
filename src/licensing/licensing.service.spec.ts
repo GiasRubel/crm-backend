@@ -1,7 +1,4 @@
-import {
-  BadRequestException,
-  ConflictException,
-} from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { LicensingService } from './licensing.service';
 
@@ -11,7 +8,10 @@ describe('LicensingService', () => {
   let service: LicensingService;
   let fetchSpy: jest.SpyInstance;
 
-  const buildDto = () => ({ purchaseCode: '  abc-123  ', domain: 'example.com' });
+  const buildDto = () => ({
+    purchaseCode: '  abc-123  ',
+    domain: 'example.com',
+  });
 
   beforeEach(() => {
     configService = { get: jest.fn() } as unknown as jest.Mocked<ConfigService>;
@@ -69,8 +69,9 @@ describe('LicensingService', () => {
     it('rejects when the purchase code belongs to a different item', async () => {
       licenseModel.exists.mockResolvedValue(null);
       await service.onModuleInit();
-      configService.get.mockImplementation((key: string) =>
-        ({ ENVATO_PERSONAL_TOKEN: 'token', ENVATO_ITEM_ID: '111' })[key],
+      configService.get.mockImplementation(
+        (key: string) =>
+          ({ ENVATO_PERSONAL_TOKEN: 'token', ENVATO_ITEM_ID: '111' })[key],
       );
       fetchSpy.mockResolvedValue({
         ok: true,
@@ -85,8 +86,9 @@ describe('LicensingService', () => {
     it('rejects when Envato reports the code as invalid', async () => {
       licenseModel.exists.mockResolvedValue(null);
       await service.onModuleInit();
-      configService.get.mockImplementation((key: string) =>
-        ({ ENVATO_PERSONAL_TOKEN: 'token', ENVATO_ITEM_ID: '111' })[key],
+      configService.get.mockImplementation(
+        (key: string) =>
+          ({ ENVATO_PERSONAL_TOKEN: 'token', ENVATO_ITEM_ID: '111' })[key],
       );
       fetchSpy.mockResolvedValue({ ok: false } as any);
 
@@ -98,8 +100,9 @@ describe('LicensingService', () => {
     it('rejects when the network call to Envato fails', async () => {
       licenseModel.exists.mockResolvedValue(null);
       await service.onModuleInit();
-      configService.get.mockImplementation((key: string) =>
-        ({ ENVATO_PERSONAL_TOKEN: 'token', ENVATO_ITEM_ID: '111' })[key],
+      configService.get.mockImplementation(
+        (key: string) =>
+          ({ ENVATO_PERSONAL_TOKEN: 'token', ENVATO_ITEM_ID: '111' })[key],
       );
       fetchSpy.mockRejectedValue(new Error('network down'));
 
@@ -111,8 +114,9 @@ describe('LicensingService', () => {
     it('rejects when the purchase code hash was already used', async () => {
       licenseModel.exists.mockResolvedValue(null);
       await service.onModuleInit();
-      configService.get.mockImplementation((key: string) =>
-        ({ ENVATO_PERSONAL_TOKEN: 'token', ENVATO_ITEM_ID: '111' })[key],
+      configService.get.mockImplementation(
+        (key: string) =>
+          ({ ENVATO_PERSONAL_TOKEN: 'token', ENVATO_ITEM_ID: '111' })[key],
       );
       fetchSpy.mockResolvedValue({
         ok: true,
@@ -130,8 +134,9 @@ describe('LicensingService', () => {
     it('activates and persists the license on a valid, unused purchase code', async () => {
       licenseModel.exists.mockResolvedValue(null);
       await service.onModuleInit();
-      configService.get.mockImplementation((key: string) =>
-        ({ ENVATO_PERSONAL_TOKEN: 'token', ENVATO_ITEM_ID: '111' })[key],
+      configService.get.mockImplementation(
+        (key: string) =>
+          ({ ENVATO_PERSONAL_TOKEN: 'token', ENVATO_ITEM_ID: '111' })[key],
       );
       fetchSpy.mockResolvedValue({
         ok: true,
@@ -142,7 +147,7 @@ describe('LicensingService', () => {
       });
       licenseModel.create.mockResolvedValue({});
 
-      const result = await service.activate(buildDto() as any);
+      const result = await service.activate(buildDto());
 
       expect(result).toEqual({ activated: true });
       expect(service.isActivated()).toBe(true);

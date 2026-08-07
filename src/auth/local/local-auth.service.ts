@@ -4,6 +4,7 @@ import { JwtService } from '@nestjs/jwt';
 import { InjectModel } from '@nestjs/mongoose';
 import * as bcrypt from 'bcryptjs';
 import { Model, Types } from 'mongoose';
+import { AuditService } from '../../audit/audit.service';
 import { User, UserDocument } from '../../users/users.schema';
 import { OrganizationsService } from '../../organizations/organizations.service';
 import { TokenPairResponseDto } from './dto/token-pair-response.dto';
@@ -23,15 +24,20 @@ export class LocalAuthService {
     private readonly organizationsService: OrganizationsService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
+    private readonly auditService: AuditService,
   ) {}
 
   async login(email: string, password: string): Promise<TokenPairResponseDto> {
+    const normalizedEmail = email.trim().toLowerCase();
     const user = await this.userModel
-      .findOne({ email: email.trim().toLowerCase() })
+      .findOne({ email: normalizedEmail })
       .select('+passwordHash')
       .exec();
 
     if (!user?.passwordHash) {
+      if (user) {
+        void this.logFailedLogin(user.organizationId, normalizedEmail);
+      }
       throw new UnauthorizedException('Invalid email or password');
     }
 
@@ -46,11 +52,32 @@ export class LocalAuthService {
 
     const matches = await bcrypt.compare(password, user.passwordHash);
     if (!matches) {
+      void this.logFailedLogin(user.organizationId, normalizedEmail);
       throw new UnauthorizedException('Invalid email or password');
     }
 
     this.logger.log(`Local auth login succeeded for ${user.email}`);
+    void this.auditService.log({
+      organizationId: user.organizationId,
+      actor: { id: user.keycloakId, email: user.email },
+      action: 'login_success',
+      entityType: 'auth',
+      summary: `${user.email} signed in`,
+    });
     return this.issueTokenPair(user);
+  }
+
+  private async logFailedLogin(
+    organizationId: Types.ObjectId,
+    email: string,
+  ): Promise<void> {
+    await this.auditService.log({
+      organizationId,
+      actor: { email },
+      action: 'login_failed',
+      entityType: 'auth',
+      summary: `Failed sign-in attempt for ${email}`,
+    });
   }
 
   async refresh(refreshToken: string): Promise<TokenPairResponseDto> {
@@ -79,7 +106,10 @@ export class LocalAuthService {
   }
 
   /** Sets/replaces a local user's password and revokes every outstanding refresh token. */
-  async setPassword(userId: Types.ObjectId, newPassword: string): Promise<void> {
+  async setPassword(
+    userId: Types.ObjectId,
+    newPassword: string,
+  ): Promise<void> {
     const passwordHash = await bcrypt.hash(newPassword, BCRYPT_SALT_ROUNDS);
     await this.userModel
       .findByIdAndUpdate(userId, {

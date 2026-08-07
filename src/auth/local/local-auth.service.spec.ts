@@ -5,6 +5,7 @@ import { Types } from 'mongoose';
 import * as bcrypt from 'bcryptjs';
 import { LocalAuthService } from './local-auth.service';
 import { OrganizationsService } from '../../organizations/organizations.service';
+import { AuditService } from '../../audit/audit.service';
 
 jest.mock('bcryptjs', () => ({
   compare: jest.fn(),
@@ -16,6 +17,7 @@ describe('LocalAuthService', () => {
   let organizationsService: jest.Mocked<OrganizationsService>;
   let jwtService: jest.Mocked<JwtService>;
   let configService: jest.Mocked<ConfigService>;
+  let auditService: jest.Mocked<AuditService>;
   let service: LocalAuthService;
 
   const localOrg = { authProvider: 'local' } as any;
@@ -38,12 +40,16 @@ describe('LocalAuthService', () => {
       getOrThrow: jest.fn((key: string) => `secret-for-${key}`),
       get: jest.fn(),
     } as unknown as jest.Mocked<ConfigService>;
+    auditService = {
+      log: jest.fn(),
+    } as unknown as jest.Mocked<AuditService>;
 
     service = new LocalAuthService(
       userModel,
       organizationsService,
       jwtService,
       configService,
+      auditService,
     );
 
     jwtService.signAsync.mockImplementation(async (payload: any) =>
@@ -67,7 +73,9 @@ describe('LocalAuthService', () => {
 
     it('rejects when no user exists for the email', async () => {
       userModel.findOne.mockReturnValue({
-        select: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(null) }),
+        select: jest
+          .fn()
+          .mockReturnValue({ exec: jest.fn().mockResolvedValue(null) }),
       });
 
       await expect(service.login('a@b.com', 'pw')).rejects.toThrow(
@@ -78,7 +86,9 @@ describe('LocalAuthService', () => {
     it("rejects when the user's org is not local-auth", async () => {
       const user = buildUser();
       userModel.findOne.mockReturnValue({
-        select: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(user) }),
+        select: jest
+          .fn()
+          .mockReturnValue({ exec: jest.fn().mockResolvedValue(user) }),
       });
       organizationsService.findDocById.mockResolvedValue(ssoOrg);
 
@@ -90,7 +100,9 @@ describe('LocalAuthService', () => {
     it('rejects on a wrong password', async () => {
       const user = buildUser();
       userModel.findOne.mockReturnValue({
-        select: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(user) }),
+        select: jest
+          .fn()
+          .mockReturnValue({ exec: jest.fn().mockResolvedValue(user) }),
       });
       organizationsService.findDocById.mockResolvedValue(localOrg);
       (bcrypt.compare as jest.Mock).mockResolvedValue(false);
@@ -103,7 +115,9 @@ describe('LocalAuthService', () => {
     it('issues a token pair on success', async () => {
       const user = buildUser();
       userModel.findOne.mockReturnValue({
-        select: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(user) }),
+        select: jest
+          .fn()
+          .mockReturnValue({ exec: jest.fn().mockResolvedValue(user) }),
       });
       organizationsService.findDocById.mockResolvedValue(localOrg);
       (bcrypt.compare as jest.Mock).mockResolvedValue(true);
@@ -131,7 +145,7 @@ describe('LocalAuthService', () => {
       jwtService.verifyAsync.mockResolvedValue({
         sub: 'local:1',
         type: 'access',
-      } as any);
+      });
 
       await expect(service.refresh('token')).rejects.toThrow(
         UnauthorizedException,
@@ -143,9 +157,11 @@ describe('LocalAuthService', () => {
         sub: 'local:1',
         type: 'refresh',
         tokenVersion: 0,
-      } as any);
+      });
       userModel.findOne.mockReturnValue({
-        exec: jest.fn().mockResolvedValue({ keycloakId: 'local:1', tokenVersion: 1 }),
+        exec: jest
+          .fn()
+          .mockResolvedValue({ keycloakId: 'local:1', tokenVersion: 1 }),
       });
 
       await expect(service.refresh('token')).rejects.toThrow(
@@ -158,7 +174,7 @@ describe('LocalAuthService', () => {
         sub: 'local:1',
         type: 'refresh',
         tokenVersion: 0,
-      } as any);
+      });
       userModel.findOne.mockReturnValue({
         exec: jest.fn().mockResolvedValue({
           keycloakId: 'local:1',
@@ -177,7 +193,9 @@ describe('LocalAuthService', () => {
   describe('setPassword', () => {
     it('hashes the password and bumps tokenVersion', async () => {
       (bcrypt.hash as jest.Mock).mockResolvedValue('new-hash');
-      const orFail = jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue({}) });
+      const orFail = jest
+        .fn()
+        .mockReturnValue({ exec: jest.fn().mockResolvedValue({}) });
       userModel.findByIdAndUpdate.mockReturnValue({ orFail });
       const userId = new Types.ObjectId();
 

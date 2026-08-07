@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { Types } from 'mongoose';
+import { actorFromJwt } from '../audit/audit.service';
 import { CurrentOrg } from '../auth/decorators/current-org.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -113,9 +114,15 @@ export class OpportunitiesController {
   assign(
     @Param('id') id: string,
     @Body() dto: AssignOpportunityDto,
+    @CurrentUser() user: KeycloakJwtPayload,
     @CurrentOrg() organizationId: Types.ObjectId,
   ) {
-    return this.opportunitiesService.assign(id, dto, organizationId);
+    return this.opportunitiesService.assign(
+      id,
+      dto,
+      actorFromJwt(user),
+      organizationId,
+    );
   }
 
   @Delete(':id')
@@ -123,8 +130,13 @@ export class OpportunitiesController {
   @HttpCode(HttpStatus.NO_CONTENT)
   remove(
     @Param('id') id: string,
+    @CurrentUser() user: KeycloakJwtPayload,
     @CurrentOrg() organizationId: Types.ObjectId,
   ) {
-    return this.opportunitiesService.remove(id, organizationId);
+    return this.opportunitiesService.remove(
+      id,
+      actorFromJwt(user),
+      organizationId,
+    );
   }
 }

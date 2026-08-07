@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { Types } from 'mongoose';
+import { actorFromJwt } from '../audit/audit.service';
 import { CurrentOrg } from '../auth/decorators/current-org.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -73,17 +74,28 @@ export class AutomationsController {
   update(
     @Param('id') id: string,
     @Body() dto: UpdateAutomationRuleDto,
+    @CurrentUser() user: KeycloakJwtPayload,
     @CurrentOrg() organizationId: Types.ObjectId,
   ) {
-    return this.automationsService.update(id, dto, organizationId);
+    return this.automationsService.update(
+      id,
+      dto,
+      actorFromJwt(user),
+      organizationId,
+    );
   }
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   remove(
     @Param('id') id: string,
+    @CurrentUser() user: KeycloakJwtPayload,
     @CurrentOrg() organizationId: Types.ObjectId,
   ) {
-    return this.automationsService.remove(id, organizationId);
+    return this.automationsService.remove(
+      id,
+      actorFromJwt(user),
+      organizationId,
+    );
   }
 }

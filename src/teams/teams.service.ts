@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { isValidObjectId, Model, Types } from 'mongoose';
+import { AuditActor, AuditService, diffFields } from '../audit/audit.service';
 import { Customer, CustomerDocument } from '../customers/customer.schema';
 import { UsersService } from '../users/users.service';
 import { CreateTeamDto } from './dto/create-team.dto';
@@ -32,6 +33,7 @@ export class TeamsService {
     @InjectModel(Customer.name)
     private readonly customerModel: Model<CustomerDocument>,
     private readonly usersService: UsersService,
+    private readonly auditService: AuditService,
   ) {}
 
   async create(
@@ -59,6 +61,16 @@ export class TeamsService {
     });
 
     this.logger.log(`Team created: ${team.name} (${team._id.toString()})`);
+    void this.auditService.log({
+      organizationId,
+      actor: { id: createdBy },
+      action: 'create',
+      entityType: 'team',
+      entityId: team._id.toString(),
+      entityLabel: team.name,
+      summary: `Created team "${team.name}"`,
+      after: team.toObject(),
+    });
     return this.toResponse(team);
   }
 
@@ -181,9 +193,11 @@ export class TeamsService {
   async update(
     id: string,
     dto: UpdateTeamDto,
+    actor: AuditActor,
     organizationId: Types.ObjectId,
   ): Promise<TeamResponseDto> {
     const team = await this.getByIdOrFail(id, organizationId);
+    const before = team.toObject();
 
     const updates: Partial<Team> = {};
     const unsets: Record<string, ''> = {};
@@ -236,10 +250,34 @@ export class TeamsService {
       .exec();
 
     this.logger.log(`Team updated: ${updated.name} (${id})`);
+    const changes = diffFields(before, updated.toObject(), [
+      'name',
+      'description',
+      'regions',
+      'memberIds',
+      'leaderId',
+      'isActive',
+    ]);
+    if (changes.length > 0) {
+      void this.auditService.log({
+        organizationId,
+        actor,
+        action: 'update',
+        entityType: 'team',
+        entityId: id,
+        entityLabel: updated.name,
+        summary: `Updated team "${updated.name}" (${changes.map((c) => c.field).join(', ')})`,
+        changes,
+      });
+    }
     return this.toResponse(updated);
   }
 
-  async remove(id: string, organizationId: Types.ObjectId): Promise<void> {
+  async remove(
+    id: string,
+    actor: AuditActor,
+    organizationId: Types.ObjectId,
+  ): Promise<void> {
     const team = await this.getByIdOrFail(id, organizationId);
 
     // Route safety: customers assigned to the deleted team return to the
@@ -255,6 +293,16 @@ export class TeamsService {
     this.logger.log(
       `Team deleted: ${team.name} (${id}); ${modifiedCount} customer(s) unassigned`,
     );
+    void this.auditService.log({
+      organizationId,
+      actor,
+      action: 'delete',
+      entityType: 'team',
+      entityId: id,
+      entityLabel: team.name,
+      summary: `Deleted team "${team.name}"`,
+      before: team.toObject(),
+    });
   }
 
   // ── Helpers used by other modules ─────────────────────────────────────────

@@ -2,7 +2,12 @@ import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { createE2eApp, signTestJwt } from './utils/e2e-app';
-import { clearDatabase, dropTestDatabase, seedOrganization, seedUser } from './utils/db';
+import {
+  clearDatabase,
+  dropTestDatabase,
+  seedOrganization,
+  seedUser,
+} from './utils/db';
 import { AppRole } from '../src/users/app-role.enum';
 
 describe('Accounts (e2e)', () => {
@@ -43,7 +48,10 @@ describe('Accounts (e2e)', () => {
       .send({ name: 'Acme Corp' })
       .expect(201);
 
-    expect(createRes.body).toMatchObject({ name: 'Acme Corp', status: 'prospect' });
+    expect(createRes.body).toMatchObject({
+      name: 'Acme Corp',
+      status: 'prospect',
+    });
     expect(createRes.body).not.toHaveProperty('organizationId');
 
     const listRes = await request(app.getHttpServer())

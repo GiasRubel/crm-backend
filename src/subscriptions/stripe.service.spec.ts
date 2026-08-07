@@ -93,7 +93,9 @@ describe('StripeService', () => {
     });
 
     it('creates a billing portal session', async () => {
-      mockBillingPortalSessionsCreate.mockResolvedValue({ url: 'https://portal' });
+      mockBillingPortalSessionsCreate.mockResolvedValue({
+        url: 'https://portal',
+      });
 
       const result = await service.createBillingPortalSession(
         'cus_1',

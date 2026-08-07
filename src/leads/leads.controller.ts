@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { Types } from 'mongoose';
+import { actorFromJwt } from '../audit/audit.service';
 import { CurrentOrg } from '../auth/decorators/current-org.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Public } from '../auth/decorators/public.decorator';
@@ -119,9 +120,15 @@ export class LeadsController {
   assign(
     @Param('id') id: string,
     @Body() dto: AssignLeadDto,
+    @CurrentUser() user: KeycloakJwtPayload,
     @CurrentOrg() organizationId: Types.ObjectId,
   ) {
-    return this.leadsService.assign(id, dto, organizationId);
+    return this.leadsService.assign(
+      id,
+      dto,
+      actorFromJwt(user),
+      organizationId,
+    );
   }
 
   /** Convert a qualified lead into a Customer (+ optionally an Opportunity). */
@@ -143,8 +150,9 @@ export class LeadsController {
   @HttpCode(HttpStatus.NO_CONTENT)
   remove(
     @Param('id') id: string,
+    @CurrentUser() user: KeycloakJwtPayload,
     @CurrentOrg() organizationId: Types.ObjectId,
   ) {
-    return this.leadsService.remove(id, organizationId);
+    return this.leadsService.remove(id, actorFromJwt(user), organizationId);
   }
 }

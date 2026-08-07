@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { isValidObjectId, Model, Types } from 'mongoose';
+import { AuditActor, AuditService, diffFields } from '../audit/audit.service';
 import { CrmEventBus } from '../events/crm-event-bus.service';
 import { KeycloakAdminService } from '../keycloak-admin/keycloak-admin.service';
 import { TeamDocument } from '../teams/team.schema';
@@ -29,6 +30,16 @@ function escapeRegExp(input: string): string {
   return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+/** Top-level fields tracked for the update-diff audit entry. */
+const CUSTOMER_AUDIT_FIELDS = [
+  'email',
+  'firstName',
+  'lastName',
+  'phone',
+  'company',
+  'status',
+];
+
 @Injectable()
 export class CustomersService {
   private readonly logger = new Logger(CustomersService.name);
@@ -40,6 +51,7 @@ export class CustomersService {
     private readonly keycloakAdminService: KeycloakAdminService,
     private readonly teamsService: TeamsService,
     private readonly eventBus: CrmEventBus,
+    private readonly auditService: AuditService,
   ) {}
 
   async create(
@@ -146,6 +158,16 @@ export class CustomersService {
           unknown
         >,
         context: {},
+      });
+      void this.auditService.log({
+        organizationId,
+        actor: { id: createdBy },
+        action: 'create',
+        entityType: 'customer',
+        entityId: createdCustomerDoc._id.toString(),
+        entityLabel: `${createdCustomerDoc.firstName} ${createdCustomerDoc.lastName}`,
+        summary: `Created customer "${createdCustomerDoc.firstName} ${createdCustomerDoc.lastName}"`,
+        after: createdCustomerDoc.toObject(),
       });
 
       return await this.mapOne(createdCustomerDoc);
@@ -323,9 +345,11 @@ export class CustomersService {
   async update(
     id: string,
     dto: UpdateCustomerDto,
+    actor: AuditActor,
     organizationId: Types.ObjectId,
   ): Promise<CustomerResponseDto> {
     const customer = await this.getByIdOrFail(id, organizationId);
+    const before = customer.toObject();
 
     const updates: Partial<Customer> = {};
     const userUpdates: Record<string, string> = {};
@@ -421,6 +445,23 @@ export class CustomersService {
       .exec();
 
     this.logger.log(`Customer profile updated: ${id}`);
+    const changes = diffFields(
+      before,
+      updatedCustomer.toObject(),
+      CUSTOMER_AUDIT_FIELDS,
+    );
+    if (changes.length > 0) {
+      void this.auditService.log({
+        organizationId,
+        actor,
+        action: 'update',
+        entityType: 'customer',
+        entityId: id,
+        entityLabel: `${updatedCustomer.firstName} ${updatedCustomer.lastName}`,
+        summary: `Updated customer "${updatedCustomer.firstName} ${updatedCustomer.lastName}" (${changes.map((c) => c.field).join(', ')})`,
+        changes,
+      });
+    }
     return this.mapOne(updatedCustomer);
   }
 
@@ -431,6 +472,7 @@ export class CustomersService {
   async assign(
     id: string,
     dto: AssignCustomerDto,
+    actor: AuditActor,
     organizationId: Types.ObjectId,
   ): Promise<CustomerResponseDto> {
     const customer = await this.getByIdOrFail(id, organizationId);
@@ -499,10 +541,27 @@ export class CustomersService {
     this.logger.log(
       `Customer ${id} routed: owner=${updated.assignedToId ?? 'none'}, team=${updated.assignedTeamId?.toString() ?? 'none'}`,
     );
+    void this.auditService.log({
+      organizationId,
+      actor,
+      action: 'assign',
+      entityType: 'customer',
+      entityId: id,
+      entityLabel: `${updated.firstName} ${updated.lastName}`,
+      summary: `Reassigned customer "${updated.firstName} ${updated.lastName}"`,
+      changes: diffFields(customer.toObject(), updated.toObject(), [
+        'assignedToId',
+        'assignedTeamId',
+      ]),
+    });
     return this.mapOne(updated);
   }
 
-  async remove(id: string, organizationId: Types.ObjectId): Promise<void> {
+  async remove(
+    id: string,
+    actor: AuditActor,
+    organizationId: Types.ObjectId,
+  ): Promise<void> {
     const customer = await this.getByIdOrFail(id, organizationId);
 
     // 1. Delete in Keycloak
@@ -522,6 +581,16 @@ export class CustomersService {
     await this.customerModel.deleteOne({ _id: id }).exec();
 
     this.logger.log(`Customer deleted: ${id}`);
+    void this.auditService.log({
+      organizationId,
+      actor,
+      action: 'delete',
+      entityType: 'customer',
+      entityId: id,
+      entityLabel: `${customer.firstName} ${customer.lastName}`,
+      summary: `Deleted customer "${customer.firstName} ${customer.lastName}"`,
+      before: customer.toObject(),
+    });
   }
 
   async resendInvitation(

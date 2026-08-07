@@ -7,6 +7,12 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { isValidObjectId, Model, Types } from 'mongoose';
+import {
+  AuditActor,
+  AuditService,
+  diffFields,
+  omitFields,
+} from '../audit/audit.service';
 import { CustomersService } from '../customers/customers.service';
 import { CrmEventBus } from '../events/crm-event-bus.service';
 import { KbService } from '../kb/kb.service';
@@ -53,6 +59,7 @@ export class TicketsService {
     private readonly customersService: CustomersService,
     private readonly kbService: KbService,
     private readonly eventBus: CrmEventBus,
+    private readonly auditService: AuditService,
   ) {}
 
   // ── Staff: create / read ────────────────────────────────────────────────
@@ -86,6 +93,16 @@ export class TicketsService {
 
     this.logger.log(`Ticket created: ${ticket.number} "${ticket.subject}"`);
     this.emitTicketEvent('ticket.created', ticket);
+    void this.auditService.log({
+      organizationId,
+      actor: { id: createdBy },
+      action: 'create',
+      entityType: 'ticket',
+      entityId: ticket._id.toString(),
+      entityLabel: `${ticket.number} ${ticket.subject}`,
+      summary: `Created ticket ${ticket.number} "${ticket.subject}"`,
+      after: omitFields(ticket.toObject(), ['comments']),
+    });
     return this.mapOne(ticket);
   }
 
@@ -313,10 +330,21 @@ export class TicketsService {
     await this.assertCanView(ticket, requesterKeycloakId, organizationId);
     if (ticket.status === dto.status) return this.mapOne(ticket);
 
+    const previousStatus = ticket.status;
     this.applyStatus(ticket, dto.status);
     await ticket.save();
 
     this.logger.log(`Ticket ${ticket.number} status → ${dto.status}`);
+    void this.auditService.log({
+      organizationId,
+      actor: { id: requesterKeycloakId },
+      action: 'status_change',
+      entityType: 'ticket',
+      entityId: id,
+      entityLabel: `${ticket.number} ${ticket.subject}`,
+      summary: `Ticket ${ticket.number} status: ${previousStatus} → ${dto.status}`,
+      changes: [{ field: 'status', from: previousStatus, to: dto.status }],
+    });
     return this.mapOne(ticket);
   }
 
@@ -361,6 +389,7 @@ export class TicketsService {
   async assign(
     id: string,
     dto: AssignTicketDto,
+    actor: AuditActor,
     organizationId: Types.ObjectId,
   ): Promise<TicketResponseDto> {
     const ticket = await this.getByIdOrFail(id, organizationId);
@@ -428,13 +457,40 @@ export class TicketsService {
     this.logger.log(
       `Ticket ${updated.number} routed: owner=${updated.assignedToId ?? 'none'}, team=${updated.assignedTeamId?.toString() ?? 'none'}`,
     );
+    void this.auditService.log({
+      organizationId,
+      actor,
+      action: 'assign',
+      entityType: 'ticket',
+      entityId: id,
+      entityLabel: `${updated.number} ${updated.subject}`,
+      summary: `Reassigned ticket ${updated.number} "${updated.subject}"`,
+      changes: diffFields(ticket.toObject(), updated.toObject(), [
+        'assignedToId',
+        'assignedTeamId',
+      ]),
+    });
     return this.mapOne(updated);
   }
 
-  async remove(id: string, organizationId: Types.ObjectId): Promise<void> {
+  async remove(
+    id: string,
+    actor: AuditActor,
+    organizationId: Types.ObjectId,
+  ): Promise<void> {
     const ticket = await this.getByIdOrFail(id, organizationId);
     await this.ticketModel.deleteOne({ _id: ticket._id }).exec();
     this.logger.log(`Ticket deleted: ${ticket.number}`);
+    void this.auditService.log({
+      organizationId,
+      actor,
+      action: 'delete',
+      entityType: 'ticket',
+      entityId: id,
+      entityLabel: `${ticket.number} ${ticket.subject}`,
+      summary: `Deleted ticket ${ticket.number} "${ticket.subject}"`,
+      before: omitFields(ticket.toObject(), ['comments']),
+    });
   }
 
   // ── Customer portal (AppRole.Customer) ──────────────────────────────────

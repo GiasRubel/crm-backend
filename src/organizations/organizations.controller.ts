@@ -1,6 +1,9 @@
 import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { actorFromJwt } from '../audit/audit.service';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
+import type { KeycloakJwtPayload } from '../auth/interfaces/keycloak-jwt-payload.interface';
 import { AppRole } from '../users/app-role.enum';
 import { CreateOrganizationDto } from './dto/create-organization.dto';
 import { UpdateOrganizationDto } from './dto/update-organization.dto';
@@ -16,8 +19,11 @@ export class OrganizationsController {
   constructor(private readonly organizationsService: OrganizationsService) {}
 
   @Post('provision')
-  provision(@Body() dto: ProvisionOrganizationDto) {
-    return this.organizationsService.provision(dto);
+  provision(
+    @Body() dto: ProvisionOrganizationDto,
+    @CurrentUser() user: KeycloakJwtPayload,
+  ) {
+    return this.organizationsService.provision(dto, actorFromJwt(user));
   }
 
   @Post()
@@ -36,7 +42,11 @@ export class OrganizationsController {
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateOrganizationDto) {
-    return this.organizationsService.update(id, dto);
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateOrganizationDto,
+    @CurrentUser() user: KeycloakJwtPayload,
+  ) {
+    return this.organizationsService.update(id, dto, actorFromJwt(user));
   }
 }

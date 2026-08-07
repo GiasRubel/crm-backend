@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { isValidObjectId, Model, Types } from 'mongoose';
+import { AuditActor, AuditService, diffFields } from '../audit/audit.service';
 import { CreateOrganizationDto } from './dto/create-organization.dto';
 import { OrganizationResponseDto } from './dto/organization-response.dto';
 import { UpdateOrganizationDto } from './dto/update-organization.dto';
@@ -37,10 +38,12 @@ export class OrganizationsService {
     private readonly keycloakAdminService: KeycloakAdminService,
     private readonly stripeService: StripeService,
     private readonly otpService: OtpService,
+    private readonly auditService: AuditService,
   ) {}
 
   async provision(
     dto: ProvisionOrganizationDto,
+    actor: AuditActor,
   ): Promise<OrganizationResponseDto> {
     const slug = dto.slug.trim().toLowerCase();
     const email = dto.adminEmail.trim().toLowerCase();
@@ -183,6 +186,16 @@ export class OrganizationsService {
       this.logger.log(
         `Organization provisioned successfully: ${organizationId.toString()} (slug: ${slug})`,
       );
+      void this.auditService.log({
+        organizationId,
+        actor,
+        action: 'create',
+        entityType: 'organization',
+        entityId: organizationId.toString(),
+        entityLabel: organization.name,
+        summary: `Provisioned organization "${organization.name}" (${slug})`,
+        after: organization.toObject(),
+      });
       return toOrganizationResponseDto(organization);
     } catch (error) {
       this.logger.error(
@@ -293,8 +306,10 @@ export class OrganizationsService {
   async update(
     id: string,
     dto: UpdateOrganizationDto,
+    actor: AuditActor,
   ): Promise<OrganizationResponseDto> {
     const organization = await this.findOrgOrThrow(id);
+    const before = organization.toObject();
 
     if (dto.name !== undefined) organization.name = dto.name.trim();
     if (dto.status !== undefined) organization.status = dto.status;
@@ -302,6 +317,23 @@ export class OrganizationsService {
       organization.authProvider = dto.authProvider;
 
     await organization.save();
+    const changes = diffFields(before, organization.toObject(), [
+      'name',
+      'status',
+      'authProvider',
+    ]);
+    if (changes.length > 0) {
+      void this.auditService.log({
+        organizationId: organization._id,
+        actor,
+        action: 'update',
+        entityType: 'organization',
+        entityId: id,
+        entityLabel: organization.name,
+        summary: `Updated organization "${organization.name}" (${changes.map((c) => c.field).join(', ')})`,
+        changes,
+      });
+    }
     return toOrganizationResponseDto(organization);
   }
 

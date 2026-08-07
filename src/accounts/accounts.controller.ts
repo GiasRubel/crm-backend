@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { Types } from 'mongoose';
+import { actorFromJwt } from '../audit/audit.service';
 import { CurrentOrg } from '../auth/decorators/current-org.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -96,9 +97,15 @@ export class AccountsController {
   assign(
     @Param('id') id: string,
     @Body() dto: AssignAccountDto,
+    @CurrentUser() user: KeycloakJwtPayload,
     @CurrentOrg() organizationId: Types.ObjectId,
   ) {
-    return this.accountsService.assign(id, dto, organizationId);
+    return this.accountsService.assign(
+      id,
+      dto,
+      actorFromJwt(user),
+      organizationId,
+    );
   }
 
   /** Deletes the profile; linked contacts/deals are unlinked, not deleted. */
@@ -107,8 +114,9 @@ export class AccountsController {
   @HttpCode(HttpStatus.NO_CONTENT)
   remove(
     @Param('id') id: string,
+    @CurrentUser() user: KeycloakJwtPayload,
     @CurrentOrg() organizationId: Types.ObjectId,
   ) {
-    return this.accountsService.remove(id, organizationId);
+    return this.accountsService.remove(id, actorFromJwt(user), organizationId);
   }
 }

@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { AuditService } from '../../audit/audit.service';
 import { UsersService } from '../../users/users.service';
 import { OtpService } from '../../otp/otp.service';
 import { KeycloakAdminService } from '../../keycloak-admin/keycloak-admin.service';
@@ -15,6 +16,7 @@ export class PasswordService {
     private readonly keycloakAdminService: KeycloakAdminService,
     private readonly organizationsService: OrganizationsService,
     private readonly localAuthService: LocalAuthService,
+    private readonly auditService: AuditService,
   ) {}
 
   /**
@@ -28,6 +30,13 @@ export class PasswordService {
     if (user) {
       await this.otpService.generateAndSend(user.keycloakId, user.email);
       this.logger.log(`Forgot-password OTP sent to ${email}`);
+      void this.auditService.log({
+        organizationId: user.organizationId,
+        actor: { id: user.keycloakId, email: user.email },
+        action: 'password_reset_requested',
+        entityType: 'auth',
+        summary: `Password reset requested for ${user.email}`,
+      });
     } else {
       // Log but don't reveal that the email doesn't exist
       this.logger.warn(`Forgot-password attempt for unknown email: ${email}`);
@@ -71,6 +80,13 @@ export class PasswordService {
     }
 
     this.logger.log(`Password reset successfully for ${email}`);
+    void this.auditService.log({
+      organizationId: user.organizationId,
+      actor: { id: user.keycloakId, email: user.email },
+      action: 'password_reset_completed',
+      entityType: 'auth',
+      summary: `Password reset completed for ${user.email}`,
+    });
     return { message: 'Password reset successfully. You can now log in.' };
   }
 }

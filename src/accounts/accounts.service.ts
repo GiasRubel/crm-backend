@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { isValidObjectId, Model, Types } from 'mongoose';
+import { AuditActor, AuditService, diffFields } from '../audit/audit.service';
 import { Contact, ContactDocument } from '../contacts/contact.schema';
 import {
   CLOSED_STAGES,
@@ -36,6 +37,18 @@ function escapeRegExp(input: string): string {
 /** Rows shown in the 360° summary lists. */
 const SUMMARY_LIST_LIMIT = 50;
 
+/** Top-level fields tracked for the update-diff audit entry. */
+const ACCOUNT_AUDIT_FIELDS = [
+  'name',
+  'industry',
+  'website',
+  'email',
+  'phone',
+  'size',
+  'annualRevenue',
+  'status',
+];
+
 @Injectable()
 export class AccountsService {
   private readonly logger = new Logger(AccountsService.name);
@@ -53,6 +66,7 @@ export class AccountsService {
     private readonly opportunityModel: Model<OpportunityDocument>,
     private readonly usersService: UsersService,
     private readonly teamsService: TeamsService,
+    private readonly auditService: AuditService,
   ) {}
 
   // ── Create / update ─────────────────────────────────────────────────────
@@ -86,6 +100,16 @@ export class AccountsService {
     });
 
     this.logger.log(`Account created: "${account.name}"`);
+    void this.auditService.log({
+      organizationId,
+      actor: { id: createdBy },
+      action: 'create',
+      entityType: 'account',
+      entityId: account._id.toString(),
+      entityLabel: account.name,
+      summary: `Created account "${account.name}"`,
+      after: account.toObject(),
+    });
     return this.mapOne(account);
   }
 
@@ -97,6 +121,7 @@ export class AccountsService {
   ): Promise<AccountResponseDto> {
     const account = await this.getByIdOrFail(id, organizationId);
     await this.assertCanView(account, requesterKeycloakId, organizationId);
+    const before = account.toObject();
 
     if (dto.name !== undefined) {
       const newName = dto.name.trim();
@@ -119,6 +144,23 @@ export class AccountsService {
 
     await account.save();
     this.logger.log(`Account updated: ${id}`);
+    const changes = diffFields(
+      before,
+      account.toObject(),
+      ACCOUNT_AUDIT_FIELDS,
+    );
+    if (changes.length > 0) {
+      void this.auditService.log({
+        organizationId,
+        actor: { id: requesterKeycloakId },
+        action: 'update',
+        entityType: 'account',
+        entityId: id,
+        entityLabel: account.name,
+        summary: `Updated account "${account.name}" (${changes.map((c) => c.field).join(', ')})`,
+        changes,
+      });
+    }
     return this.mapOne(account);
   }
 
@@ -327,6 +369,7 @@ export class AccountsService {
   async assign(
     id: string,
     dto: AssignAccountDto,
+    actor: AuditActor,
     organizationId: Types.ObjectId,
   ): Promise<AccountResponseDto> {
     const account = await this.getByIdOrFail(id, organizationId);
@@ -395,6 +438,19 @@ export class AccountsService {
     this.logger.log(
       `Account ${id} routed: owner=${updated.assignedToId ?? 'none'}, team=${updated.assignedTeamId?.toString() ?? 'none'}`,
     );
+    void this.auditService.log({
+      organizationId,
+      actor,
+      action: 'assign',
+      entityType: 'account',
+      entityId: id,
+      entityLabel: updated.name,
+      summary: `Reassigned account "${updated.name}"`,
+      changes: diffFields(account.toObject(), updated.toObject(), [
+        'assignedToId',
+        'assignedTeamId',
+      ]),
+    });
     return this.mapOne(updated);
   }
 
@@ -402,7 +458,11 @@ export class AccountsService {
    * Deleting an account keeps its people and deals: linked contacts and
    * opportunities are unlinked (accountId cleared), never cascaded.
    */
-  async remove(id: string, organizationId: Types.ObjectId): Promise<void> {
+  async remove(
+    id: string,
+    actor: AuditActor,
+    organizationId: Types.ObjectId,
+  ): Promise<void> {
     const account = await this.getByIdOrFail(id, organizationId);
 
     const [contactResult, opportunityResult] = await Promise.all([
@@ -421,6 +481,16 @@ export class AccountsService {
     this.logger.log(
       `Account deleted: ${id} (unlinked ${contactResult.modifiedCount} contacts, ${opportunityResult.modifiedCount} opportunities)`,
     );
+    void this.auditService.log({
+      organizationId,
+      actor,
+      action: 'delete',
+      entityType: 'account',
+      entityId: id,
+      entityLabel: account.name,
+      summary: `Deleted account "${account.name}"`,
+      before: account.toObject(),
+    });
   }
 
   // ── Cross-module lookups (used by contacts/opportunities) ──────────────

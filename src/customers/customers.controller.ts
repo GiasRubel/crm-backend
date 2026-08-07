@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { Types } from 'mongoose';
+import { actorFromJwt } from '../audit/audit.service';
 import { CurrentOrg } from '../auth/decorators/current-org.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -80,9 +81,15 @@ export class CustomersController {
   update(
     @Param('id') id: string,
     @Body() dto: UpdateCustomerDto,
+    @CurrentUser() user: KeycloakJwtPayload,
     @CurrentOrg() organizationId: Types.ObjectId,
   ) {
-    return this.customersService.update(id, dto, organizationId);
+    return this.customersService.update(
+      id,
+      dto,
+      actorFromJwt(user),
+      organizationId,
+    );
   }
 
   /** Record routing: set/clear the record owner and/or the assigned team. */
@@ -91,9 +98,15 @@ export class CustomersController {
   assign(
     @Param('id') id: string,
     @Body() dto: AssignCustomerDto,
+    @CurrentUser() user: KeycloakJwtPayload,
     @CurrentOrg() organizationId: Types.ObjectId,
   ) {
-    return this.customersService.assign(id, dto, organizationId);
+    return this.customersService.assign(
+      id,
+      dto,
+      actorFromJwt(user),
+      organizationId,
+    );
   }
 
   @Delete(':id')
@@ -101,9 +114,10 @@ export class CustomersController {
   @HttpCode(HttpStatus.NO_CONTENT)
   remove(
     @Param('id') id: string,
+    @CurrentUser() user: KeycloakJwtPayload,
     @CurrentOrg() organizationId: Types.ObjectId,
   ) {
-    return this.customersService.remove(id, organizationId);
+    return this.customersService.remove(id, actorFromJwt(user), organizationId);
   }
 
   @Post(':id/resend')

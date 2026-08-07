@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { actorFromJwt } from '../audit/audit.service';
 import { CurrentOrg } from '../auth/decorators/current-org.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -36,8 +37,13 @@ export class UsersController {
   @Roles(AppRole.Admin, AppRole.Administrator)
   createStaff(
     @Body() dto: CreateStaffDto,
+    @CurrentUser() user: KeycloakJwtPayload,
     @CurrentOrg() organizationId: Types.ObjectId,
   ): Promise<StaffUserResponseDto> {
-    return this.usersService.createStaff(dto, organizationId);
+    return this.usersService.createStaff(
+      dto,
+      actorFromJwt(user),
+      organizationId,
+    );
   }
 }

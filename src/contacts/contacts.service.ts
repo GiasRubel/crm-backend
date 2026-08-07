@@ -9,6 +9,12 @@ import {
 import { InjectModel } from '@nestjs/mongoose';
 import { isValidObjectId, Model, Types } from 'mongoose';
 import { AccountsService } from '../accounts/accounts.service';
+import {
+  AuditActor,
+  AuditService,
+  diffFields,
+  omitFields,
+} from '../audit/audit.service';
 import { CustomersService } from '../customers/customers.service';
 import { CrmEventBus } from '../events/crm-event-bus.service';
 import { TeamDocument } from '../teams/team.schema';
@@ -30,6 +36,24 @@ function escapeRegExp(input: string): string {
   return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+/** Top-level fields tracked for the update-diff audit entry. */
+const CONTACT_AUDIT_FIELDS = [
+  'firstName',
+  'lastName',
+  'email',
+  'phone',
+  'jobTitle',
+  'department',
+  'accountId',
+  'customerId',
+  'isPrimary',
+  'preferredChannel',
+  'emailOptIn',
+  'phoneOptIn',
+  'smsOptIn',
+  'doNotContact',
+];
+
 @Injectable()
 export class ContactsService {
   private readonly logger = new Logger(ContactsService.name);
@@ -42,6 +66,7 @@ export class ContactsService {
     private readonly accountsService: AccountsService,
     private readonly customersService: CustomersService,
     private readonly eventBus: CrmEventBus,
+    private readonly auditService: AuditService,
   ) {}
 
   // ── Create ──────────────────────────────────────────────────────────────
@@ -108,6 +133,16 @@ export class ContactsService {
       recordId: contact._id.toString(),
       record: contact.toObject() as unknown as Record<string, unknown>,
       context: {},
+    });
+    void this.auditService.log({
+      organizationId,
+      actor: { id: createdBy },
+      action: 'create',
+      entityType: 'contact',
+      entityId: contact._id.toString(),
+      entityLabel: `${contact.firstName} ${contact.lastName}`,
+      summary: `Created contact "${contact.firstName} ${contact.lastName}"`,
+      after: omitFields(contact.toObject(), ['interactions']),
     });
     return this.mapOne(contact);
   }
@@ -257,6 +292,7 @@ export class ContactsService {
   ): Promise<ContactResponseDto> {
     const contact = await this.getByIdOrFail(id, organizationId);
     await this.assertCanView(contact, requesterKeycloakId, organizationId);
+    const before = contact.toObject();
 
     if (dto.email !== undefined) {
       const newEmail = dto.email.trim().toLowerCase();
@@ -325,6 +361,23 @@ export class ContactsService {
     }
 
     this.logger.log(`Contact updated: ${id}`);
+    const changes = diffFields(
+      before,
+      contact.toObject(),
+      CONTACT_AUDIT_FIELDS,
+    );
+    if (changes.length > 0) {
+      void this.auditService.log({
+        organizationId,
+        actor: { id: requesterKeycloakId },
+        action: 'update',
+        entityType: 'contact',
+        entityId: id,
+        entityLabel: `${contact.firstName} ${contact.lastName}`,
+        summary: `Updated contact "${contact.firstName} ${contact.lastName}" (${changes.map((c) => c.field).join(', ')})`,
+        changes,
+      });
+    }
     return this.mapOne(contact);
   }
 
@@ -359,6 +412,7 @@ export class ContactsService {
   async assign(
     id: string,
     dto: AssignContactDto,
+    actor: AuditActor,
     organizationId: Types.ObjectId,
   ): Promise<ContactResponseDto> {
     const contact = await this.getByIdOrFail(id, organizationId);
@@ -427,13 +481,40 @@ export class ContactsService {
     this.logger.log(
       `Contact ${id} routed: owner=${updated.assignedToId ?? 'none'}, team=${updated.assignedTeamId?.toString() ?? 'none'}`,
     );
+    void this.auditService.log({
+      organizationId,
+      actor,
+      action: 'assign',
+      entityType: 'contact',
+      entityId: id,
+      entityLabel: `${updated.firstName} ${updated.lastName}`,
+      summary: `Reassigned contact "${updated.firstName} ${updated.lastName}"`,
+      changes: diffFields(contact.toObject(), updated.toObject(), [
+        'assignedToId',
+        'assignedTeamId',
+      ]),
+    });
     return this.mapOne(updated);
   }
 
-  async remove(id: string, organizationId: Types.ObjectId): Promise<void> {
+  async remove(
+    id: string,
+    actor: AuditActor,
+    organizationId: Types.ObjectId,
+  ): Promise<void> {
     const contact = await this.getByIdOrFail(id, organizationId);
     await this.contactModel.deleteOne({ _id: contact._id }).exec();
     this.logger.log(`Contact deleted: ${id}`);
+    void this.auditService.log({
+      organizationId,
+      actor,
+      action: 'delete',
+      entityType: 'contact',
+      entityId: id,
+      entityLabel: `${contact.firstName} ${contact.lastName}`,
+      summary: `Deleted contact "${contact.firstName} ${contact.lastName}"`,
+      before: omitFields(contact.toObject(), ['interactions']),
+    });
   }
 
   // ── Row-level visibility (same model as CustomersService) ──────────────

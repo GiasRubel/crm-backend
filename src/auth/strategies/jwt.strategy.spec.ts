@@ -32,7 +32,10 @@ describe('JwtStrategy', () => {
 
   it('rejects a token issued for a different client', () => {
     const strategy = new JwtStrategy(buildConfigService());
-    const payload: KeycloakJwtPayload = { sub: 'user-1', azp: 'some-other-app' };
+    const payload: KeycloakJwtPayload = {
+      sub: 'user-1',
+      azp: 'some-other-app',
+    };
 
     expect(() => strategy.validate(payload)).toThrow(UnauthorizedException);
   });

@@ -10,6 +10,7 @@ import {
 import { InjectModel } from '@nestjs/mongoose';
 import { ConfigService } from '@nestjs/config';
 import { Model, Types } from 'mongoose';
+import { AuditActor, AuditService } from '../audit/audit.service';
 import type { KeycloakJwtPayload } from '../auth/interfaces/keycloak-jwt-payload.interface';
 import { KeycloakAdminService } from '../keycloak-admin/keycloak-admin.service';
 import { generateLocalSubjectId } from '../auth/local/local-subject-id.util';
@@ -39,6 +40,7 @@ export class UsersService {
     @Inject(forwardRef(() => OrganizationsService))
     private readonly organizationsService: OrganizationsService,
     private readonly otpService: OtpService,
+    private readonly auditService: AuditService,
   ) {}
 
   /**
@@ -50,6 +52,7 @@ export class UsersService {
    */
   async createStaff(
     dto: CreateStaffDto,
+    actor: AuditActor,
     organizationId: Types.ObjectId,
   ): Promise<StaffUserResponseDto> {
     const email = dto.email.trim().toLowerCase();
@@ -77,6 +80,16 @@ export class UsersService {
           otpError,
         );
       }
+      void this.auditService.log({
+        organizationId,
+        actor,
+        action: 'invite_sent',
+        entityType: 'user',
+        entityId: created._id.toString(),
+        entityLabel: `${created.firstName} ${created.lastName}`,
+        summary: `Invited staff member "${created.firstName} ${created.lastName}" (${created.role})`,
+        metadata: { role: created.role },
+      });
       return toStaffUserResponseDto(created);
     }
 
@@ -105,6 +118,16 @@ export class UsersService {
         );
       }
 
+      void this.auditService.log({
+        organizationId,
+        actor,
+        action: 'invite_sent',
+        entityType: 'user',
+        entityId: created._id.toString(),
+        entityLabel: `${created.firstName} ${created.lastName}`,
+        summary: `Invited staff member "${created.firstName} ${created.lastName}" (${created.role})`,
+        metadata: { role: created.role },
+      });
       return toStaffUserResponseDto(created);
     } catch (error) {
       this.logger.error(
@@ -290,7 +313,10 @@ export class UsersService {
     if (user.email !== identity.email) updates.email = identity.email;
     if (identity.username !== undefined && user.username !== identity.username)
       updates.username = identity.username;
-    if (identity.firstName !== undefined && user.firstName !== identity.firstName)
+    if (
+      identity.firstName !== undefined &&
+      user.firstName !== identity.firstName
+    )
       updates.firstName = identity.firstName;
     if (identity.lastName !== undefined && user.lastName !== identity.lastName)
       updates.lastName = identity.lastName;

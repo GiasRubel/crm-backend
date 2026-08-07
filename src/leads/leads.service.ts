@@ -9,6 +9,12 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { isValidObjectId, Model, Types } from 'mongoose';
+import {
+  AuditActor,
+  AuditService,
+  diffFields,
+  omitFields,
+} from '../audit/audit.service';
 import { CustomersService } from '../customers/customers.service';
 import { CrmEventBus } from '../events/crm-event-bus.service';
 import { OpportunitiesService } from '../opportunities/opportunities.service';
@@ -49,6 +55,19 @@ const CONTACT_ENGAGEMENTS: readonly EngagementType[] = [
   'email_replied',
 ];
 
+/** Top-level fields tracked for the update-diff audit entry. */
+const LEAD_AUDIT_FIELDS = [
+  'firstName',
+  'lastName',
+  'email',
+  'phone',
+  'company',
+  'jobTitle',
+  'source',
+  'estimatedValue',
+  'status',
+];
+
 @Injectable()
 export class LeadsService {
   private readonly logger = new Logger(LeadsService.name);
@@ -62,6 +81,7 @@ export class LeadsService {
     private readonly opportunitiesService: OpportunitiesService,
     private readonly organizationsService: OrganizationsService,
     private readonly eventBus: CrmEventBus,
+    private readonly auditService: AuditService,
   ) {}
 
   /** Publish a lead domain event for the automation engine. */
@@ -111,6 +131,16 @@ export class LeadsService {
 
     this.logger.log(`Lead created (${lead.source}): ${email}`);
     this.emitLeadEvent('lead.created', lead);
+    void this.auditService.log({
+      organizationId,
+      actor: { id: createdBy },
+      action: 'create',
+      entityType: 'lead',
+      entityId: lead._id.toString(),
+      entityLabel: `${lead.firstName} ${lead.lastName}`,
+      summary: `Created lead "${lead.firstName} ${lead.lastName}"`,
+      after: omitFields(lead.toObject(), ['engagements']),
+    });
     return this.mapOne(lead);
   }
 
@@ -361,6 +391,7 @@ export class LeadsService {
     this.assertNotConverted(lead);
 
     const previousStatus = lead.status;
+    const before = lead.toObject();
 
     if (dto.email !== undefined) {
       const newEmail = dto.email.trim().toLowerCase();
@@ -391,6 +422,21 @@ export class LeadsService {
       this.emitLeadEvent('lead.status_changed', lead, {
         previousStatus,
         newStatus: lead.status,
+      });
+    }
+    const changes = diffFields(before, lead.toObject(), LEAD_AUDIT_FIELDS);
+    if (changes.length > 0) {
+      void this.auditService.log({
+        organizationId,
+        actor: { id: requesterKeycloakId },
+        action: changes.some((c) => c.field === 'status')
+          ? 'status_change'
+          : 'update',
+        entityType: 'lead',
+        entityId: id,
+        entityLabel: `${lead.firstName} ${lead.lastName}`,
+        summary: `Updated lead "${lead.firstName} ${lead.lastName}" (${changes.map((c) => c.field).join(', ')})`,
+        changes,
       });
     }
     return this.mapOne(lead);
@@ -453,6 +499,7 @@ export class LeadsService {
   async assign(
     id: string,
     dto: AssignLeadDto,
+    actor: AuditActor,
     organizationId: Types.ObjectId,
   ): Promise<LeadResponseDto> {
     const lead = await this.getByIdOrFail(id, organizationId);
@@ -520,6 +567,19 @@ export class LeadsService {
     this.logger.log(
       `Lead ${id} routed: owner=${updated.assignedToId ?? 'none'}, team=${updated.assignedTeamId?.toString() ?? 'none'}`,
     );
+    void this.auditService.log({
+      organizationId,
+      actor,
+      action: 'assign',
+      entityType: 'lead',
+      entityId: id,
+      entityLabel: `${updated.firstName} ${updated.lastName}`,
+      summary: `Reassigned lead "${updated.firstName} ${updated.lastName}"`,
+      changes: diffFields(lead.toObject(), updated.toObject(), [
+        'assignedToId',
+        'assignedTeamId',
+      ]),
+    });
     return this.mapOne(updated);
   }
 
@@ -614,6 +674,16 @@ export class LeadsService {
         previousStatus: 'qualified',
         newStatus: 'converted',
       });
+      void this.auditService.log({
+        organizationId,
+        actor: { id: requesterKeycloakId },
+        action: 'convert',
+        entityType: 'lead',
+        entityId: id,
+        entityLabel: `${lead.firstName} ${lead.lastName}`,
+        summary: `Converted lead "${lead.firstName} ${lead.lastName}" → customer${opportunityId ? ' + opportunity' : ''}`,
+        metadata: { customerId: customer.id, opportunityId },
+      });
       return this.mapOne(lead);
     } catch (error) {
       this.logger.error(
@@ -623,7 +693,11 @@ export class LeadsService {
 
       if (opportunityId) {
         try {
-          await this.opportunitiesService.remove(opportunityId, organizationId);
+          await this.opportunitiesService.remove(
+            opportunityId,
+            { id: requesterKeycloakId },
+            organizationId,
+          );
         } catch (oppError) {
           this.logger.error(
             `Rollback failure: could not delete opportunity ${opportunityId}:`,
@@ -633,7 +707,11 @@ export class LeadsService {
       }
       try {
         // Removes the Keycloak account and both Mongo documents
-        await this.customersService.remove(customer.id, organizationId);
+        await this.customersService.remove(
+          customer.id,
+          { id: requesterKeycloakId },
+          organizationId,
+        );
       } catch (custError) {
         this.logger.error(
           `Rollback critical failure: could not delete customer ${customer.id}:`,
@@ -651,10 +729,24 @@ export class LeadsService {
     }
   }
 
-  async remove(id: string, organizationId: Types.ObjectId): Promise<void> {
+  async remove(
+    id: string,
+    actor: AuditActor,
+    organizationId: Types.ObjectId,
+  ): Promise<void> {
     const lead = await this.getByIdOrFail(id, organizationId);
     await this.leadModel.deleteOne({ _id: lead._id }).exec();
     this.logger.log(`Lead deleted: ${id}`);
+    void this.auditService.log({
+      organizationId,
+      actor,
+      action: 'delete',
+      entityType: 'lead',
+      entityId: id,
+      entityLabel: `${lead.firstName} ${lead.lastName}`,
+      summary: `Deleted lead "${lead.firstName} ${lead.lastName}"`,
+      before: omitFields(lead.toObject(), ['engagements']),
+    });
   }
 
   // ── Row-level visibility (same model as CustomersService) ──────────────

@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { Types } from 'mongoose';
+import { actorFromJwt } from '../audit/audit.service';
 import { CurrentOrg } from '../auth/decorators/current-org.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -88,9 +89,15 @@ export class TeamsController {
   update(
     @Param('id') id: string,
     @Body() dto: UpdateTeamDto,
+    @CurrentUser() user: KeycloakJwtPayload,
     @CurrentOrg() organizationId: Types.ObjectId,
   ) {
-    return this.teamsService.update(id, dto, organizationId);
+    return this.teamsService.update(
+      id,
+      dto,
+      actorFromJwt(user),
+      organizationId,
+    );
   }
 
   @Delete(':id')
@@ -98,8 +105,9 @@ export class TeamsController {
   @HttpCode(HttpStatus.NO_CONTENT)
   remove(
     @Param('id') id: string,
+    @CurrentUser() user: KeycloakJwtPayload,
     @CurrentOrg() organizationId: Types.ObjectId,
   ) {
-    return this.teamsService.remove(id, organizationId);
+    return this.teamsService.remove(id, actorFromJwt(user), organizationId);
   }
 }

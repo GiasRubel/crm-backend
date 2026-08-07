@@ -10,6 +10,7 @@ import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { isValidObjectId, Model, Types } from 'mongoose';
 import { ActivitiesService } from '../activities/activities.service';
+import { AuditActor, AuditService, diffFields } from '../audit/audit.service';
 import { ContactsService } from '../contacts/contacts.service';
 import { CustomersService } from '../customers/customers.service';
 import {
@@ -67,6 +68,12 @@ const SLA_SWEEP_BATCH = 100;
 /** Actor recorded on records the engine creates. */
 const SYSTEM_ACTOR = 'system:automation';
 
+/** Audit actor attributed to changes the automation engine makes on its own. */
+const SYSTEM_AUDIT_ACTOR: AuditActor = {
+  id: SYSTEM_ACTOR,
+  name: 'Automation engine',
+};
+
 /** {{field}} → context value; unknown fields render as empty string. */
 function renderTemplate(
   template: string,
@@ -111,6 +118,7 @@ export class AutomationsService implements OnModuleInit, OnModuleDestroy {
     private readonly opportunitiesService: OpportunitiesService,
     private readonly customersService: CustomersService,
     private readonly contactsService: ContactsService,
+    private readonly auditService: AuditService,
   ) {}
 
   // ── Engine lifecycle ────────────────────────────────────────────────────
@@ -488,6 +496,7 @@ export class AutomationsService implements OnModuleInit, OnModuleDestroy {
             await this.leadsService.assign(
               run.recordId,
               dto,
+              SYSTEM_AUDIT_ACTOR,
               rule.organizationId,
             );
             break;
@@ -495,6 +504,7 @@ export class AutomationsService implements OnModuleInit, OnModuleDestroy {
             await this.opportunitiesService.assign(
               run.recordId,
               dto,
+              SYSTEM_AUDIT_ACTOR,
               rule.organizationId,
             );
             break;
@@ -502,6 +512,7 @@ export class AutomationsService implements OnModuleInit, OnModuleDestroy {
             await this.customersService.assign(
               run.recordId,
               dto,
+              SYSTEM_AUDIT_ACTOR,
               rule.organizationId,
             );
             break;
@@ -509,6 +520,7 @@ export class AutomationsService implements OnModuleInit, OnModuleDestroy {
             await this.contactsService.assign(
               run.recordId,
               dto,
+              SYSTEM_AUDIT_ACTOR,
               rule.organizationId,
             );
             break;
@@ -608,6 +620,16 @@ export class AutomationsService implements OnModuleInit, OnModuleDestroy {
     });
 
     this.logger.log(`Automation rule created: "${rule.name}" (${rule.kind})`);
+    void this.auditService.log({
+      organizationId,
+      actor: { id: createdBy },
+      action: 'create',
+      entityType: 'automation_rule',
+      entityId: rule._id.toString(),
+      entityLabel: rule.name,
+      summary: `Created ${rule.kind} rule "${rule.name}"`,
+      after: rule.toObject(),
+    });
     return toRuleResponseDto(rule);
   }
 
@@ -687,9 +709,11 @@ export class AutomationsService implements OnModuleInit, OnModuleDestroy {
   async update(
     id: string,
     dto: UpdateAutomationRuleDto,
+    actor: AuditActor,
     organizationId: Types.ObjectId,
   ): Promise<AutomationRuleResponseDto> {
     const rule = await this.getByIdOrFail(id, organizationId);
+    const before = rule.toObject();
 
     if (dto.name !== undefined) rule.name = dto.name.trim();
     if (dto.description !== undefined)
@@ -715,13 +739,46 @@ export class AutomationsService implements OnModuleInit, OnModuleDestroy {
 
     await rule.save();
     this.logger.log(`Automation rule updated: ${id}`);
+    const changes = diffFields(before, rule.toObject(), [
+      'name',
+      'isActive',
+      'triggerEvent',
+      'slaEntity',
+      'slaIdleHours',
+    ]);
+    if (changes.length > 0) {
+      void this.auditService.log({
+        organizationId,
+        actor,
+        action: 'update',
+        entityType: 'automation_rule',
+        entityId: id,
+        entityLabel: rule.name,
+        summary: `Updated rule "${rule.name}" (${changes.map((c) => c.field).join(', ')})`,
+        changes,
+      });
+    }
     return toRuleResponseDto(rule);
   }
 
-  async remove(id: string, organizationId: Types.ObjectId): Promise<void> {
+  async remove(
+    id: string,
+    actor: AuditActor,
+    organizationId: Types.ObjectId,
+  ): Promise<void> {
     const rule = await this.getByIdOrFail(id, organizationId);
     await this.ruleModel.deleteOne({ _id: rule._id }).exec();
     this.logger.log(`Automation rule deleted: ${id} ("${rule.name}")`);
+    void this.auditService.log({
+      organizationId,
+      actor,
+      action: 'delete',
+      entityType: 'automation_rule',
+      entityId: id,
+      entityLabel: rule.name,
+      summary: `Deleted rule "${rule.name}"`,
+      before: rule.toObject(),
+    });
   }
 
   async findRuns(query: RunQueryDto, organizationId: Types.ObjectId) {

@@ -5,7 +5,12 @@ import request from 'supertest';
 import { App } from 'supertest/types';
 import * as bcrypt from 'bcryptjs';
 import { createE2eApp, signTestJwt } from './utils/e2e-app';
-import { clearDatabase, dropTestDatabase, seedOrganization, seedUser } from './utils/db';
+import {
+  clearDatabase,
+  dropTestDatabase,
+  seedOrganization,
+  seedUser,
+} from './utils/db';
 import { AppRole } from '../src/users/app-role.enum';
 import { User } from '../src/users/users.schema';
 
@@ -63,7 +68,7 @@ describe('Local auth (e2e)', () => {
       .expect(401);
   });
 
-  it("rejects login for a user whose org uses Keycloak SSO, even with the right password", async () => {
+  it('rejects login for a user whose org uses Keycloak SSO, even with the right password', async () => {
     const org = await seedOrganization(app, { authProvider: 'keycloak' });
     const passwordHash = await bcrypt.hash('correct-password', 12);
     const user = await seedUser(app, org._id, AppRole.User, {
@@ -100,7 +105,10 @@ describe('Local auth (e2e)', () => {
     // change — bump tokenVersion, which must invalidate every refresh token
     // issued before it.
     const userModel = app.get<Model<User>>(getModelToken(User.name));
-    await userModel.updateOne({ email: user.email }, { $inc: { tokenVersion: 1 } });
+    await userModel.updateOne(
+      { email: user.email },
+      { $inc: { tokenVersion: 1 } },
+    );
 
     await request(app.getHttpServer())
       .post('/auth/local/refresh')

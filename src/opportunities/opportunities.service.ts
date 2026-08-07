@@ -8,6 +8,12 @@ import {
 import { InjectModel } from '@nestjs/mongoose';
 import { isValidObjectId, Model, Types } from 'mongoose';
 import { AccountsService } from '../accounts/accounts.service';
+import {
+  AuditActor,
+  AuditService,
+  diffFields,
+  omitFields,
+} from '../audit/audit.service';
 import { CustomersService } from '../customers/customers.service';
 import { CrmEventBus } from '../events/crm-event-bus.service';
 import { TeamDocument } from '../teams/team.schema';
@@ -42,6 +48,9 @@ function escapeRegExp(input: string): string {
 /** Cards per column returned by the Kanban board endpoint. */
 const BOARD_COLUMN_LIMIT = 100;
 
+/** Top-level fields tracked for the update-diff audit entry. */
+const OPPORTUNITY_AUDIT_FIELDS = ['name', 'amount', 'probability', 'accountId'];
+
 @Injectable()
 export class OpportunitiesService {
   private readonly logger = new Logger(OpportunitiesService.name);
@@ -54,6 +63,7 @@ export class OpportunitiesService {
     private readonly customersService: CustomersService,
     private readonly accountsService: AccountsService,
     private readonly eventBus: CrmEventBus,
+    private readonly auditService: AuditService,
   ) {}
 
   /** Publish an opportunity domain event for the automation engine. */
@@ -120,6 +130,16 @@ export class OpportunitiesService {
       `Opportunity created: "${opportunity.name}" (${stage}, ${opportunity.amount})`,
     );
     this.emitOpportunityEvent('opportunity.created', opportunity);
+    void this.auditService.log({
+      organizationId,
+      actor: { id: createdBy },
+      action: 'create',
+      entityType: 'opportunity',
+      entityId: opportunity._id.toString(),
+      entityLabel: opportunity.name,
+      summary: `Created opportunity "${opportunity.name}"`,
+      after: omitFields(opportunity.toObject(), ['stageHistory']),
+    });
     return this.mapOne(opportunity);
   }
 
@@ -347,6 +367,7 @@ export class OpportunitiesService {
   ): Promise<OpportunityResponseDto> {
     const opportunity = await this.getByIdOrFail(id, organizationId);
     await this.assertCanView(opportunity, requesterKeycloakId, organizationId);
+    const before = opportunity.toObject();
 
     if (dto.name !== undefined) opportunity.name = dto.name.trim();
     if (dto.amount !== undefined) opportunity.amount = dto.amount;
@@ -372,6 +393,23 @@ export class OpportunitiesService {
 
     await opportunity.save();
     this.logger.log(`Opportunity updated: ${id}`);
+    const changes = diffFields(
+      before,
+      opportunity.toObject(),
+      OPPORTUNITY_AUDIT_FIELDS,
+    );
+    if (changes.length > 0) {
+      void this.auditService.log({
+        organizationId,
+        actor: { id: requesterKeycloakId },
+        action: 'update',
+        entityType: 'opportunity',
+        entityId: id,
+        entityLabel: opportunity.name,
+        summary: `Updated opportunity "${opportunity.name}" (${changes.map((c) => c.field).join(', ')})`,
+        changes,
+      });
+    }
     return this.mapOne(opportunity);
   }
 
@@ -430,6 +468,17 @@ export class OpportunitiesService {
       previousStage: from,
       newStage: to,
     });
+    void this.auditService.log({
+      organizationId,
+      actor: { id: requesterKeycloakId },
+      action: 'stage_change',
+      entityType: 'opportunity',
+      entityId: id,
+      entityLabel: opportunity.name,
+      summary: `Moved opportunity "${opportunity.name}" from ${from} to ${to}`,
+      changes: [{ field: 'stage', from, to }],
+      metadata: dto.lostReason ? { lostReason: dto.lostReason } : undefined,
+    });
     return this.mapOne(opportunity);
   }
 
@@ -440,6 +489,7 @@ export class OpportunitiesService {
   async assign(
     id: string,
     dto: AssignOpportunityDto,
+    actor: AuditActor,
     organizationId: Types.ObjectId,
   ): Promise<OpportunityResponseDto> {
     const opportunity = await this.getByIdOrFail(id, organizationId);
@@ -508,13 +558,40 @@ export class OpportunitiesService {
     this.logger.log(
       `Opportunity ${id} routed: owner=${updated.assignedToId ?? 'none'}, team=${updated.assignedTeamId?.toString() ?? 'none'}`,
     );
+    void this.auditService.log({
+      organizationId,
+      actor,
+      action: 'assign',
+      entityType: 'opportunity',
+      entityId: id,
+      entityLabel: updated.name,
+      summary: `Reassigned opportunity "${updated.name}"`,
+      changes: diffFields(opportunity.toObject(), updated.toObject(), [
+        'assignedToId',
+        'assignedTeamId',
+      ]),
+    });
     return this.mapOne(updated);
   }
 
-  async remove(id: string, organizationId: Types.ObjectId): Promise<void> {
+  async remove(
+    id: string,
+    actor: AuditActor,
+    organizationId: Types.ObjectId,
+  ): Promise<void> {
     const opportunity = await this.getByIdOrFail(id, organizationId);
     await this.opportunityModel.deleteOne({ _id: opportunity._id }).exec();
     this.logger.log(`Opportunity deleted: ${id}`);
+    void this.auditService.log({
+      organizationId,
+      actor,
+      action: 'delete',
+      entityType: 'opportunity',
+      entityId: id,
+      entityLabel: opportunity.name,
+      summary: `Deleted opportunity "${opportunity.name}"`,
+      before: omitFields(opportunity.toObject(), ['stageHistory']),
+    });
   }
 
   // ── Row-level visibility (same model as CustomersService) ──────────────

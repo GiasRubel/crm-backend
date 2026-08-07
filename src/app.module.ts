@@ -23,6 +23,7 @@ import { ReportsModule } from './reports/reports.module';
 import { OrganizationsModule } from './organizations/organizations.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 import { LicensingModule } from './licensing/licensing.module';
+import { AuditModule } from './audit/audit.module';
 
 @Module({
   imports: [
@@ -35,6 +36,7 @@ import { LicensingModule } from './licensing/licensing.module';
     }),
     KeycloakAdminModule, // Global — available to all modules
     EventsModule, // Global — CrmEventBus injectable everywhere
+    AuditModule, // Global — AuditService injectable everywhere
     LicensingModule, // Must run before AuthModule: gates the whole API on activation
     AuthModule,
     UsersModule,
