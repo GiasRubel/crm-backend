@@ -1,15 +1,29 @@
+import { ApiProperty } from '@nestjs/swagger';
 import { ReportGranularity } from '../report-datasets';
+import {
+  ReportDateRangeDto,
+  ReportFilterDto,
+  ReportMetricDto,
+} from './run-report.dto';
 
 export class SavedReportResponseDto {
   id: string;
   name: string;
   description?: string;
   dataset: string;
-  filters: Array<{ field: string; operator: string; value?: unknown }>;
-  dateRange?: { field?: string; from?: string; to?: string };
+
+  @ApiProperty({ type: () => ReportFilterDto, isArray: true })
+  filters: ReportFilterDto[];
+
+  @ApiProperty({ type: () => ReportDateRangeDto, required: false })
+  dateRange?: ReportDateRangeDto;
+
   groupBy?: string;
   groupByGranularity?: ReportGranularity;
-  metrics: Array<{ fn: string; field?: string; alias?: string }>;
+
+  @ApiProperty({ type: () => ReportMetricDto, isArray: true })
+  metrics: ReportMetricDto[];
+
   columns: string[];
   sortBy?: string;
   sortOrder?: 'asc' | 'desc';

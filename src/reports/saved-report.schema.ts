@@ -14,7 +14,7 @@ export class SavedReportFilter {
   @Prop({ required: true })
   field: string;
 
-  @Prop({ required: true })
+  @Prop({ type: String, required: true })
   operator: ReportOperator;
 
   /** Scalar or array; type depends on field/operator. */
@@ -27,7 +27,7 @@ export const SavedReportFilterSchema =
 /** One aggregation metric of a saved report definition. */
 @Schema({ _id: false })
 export class SavedReportMetric {
-  @Prop({ required: true })
+  @Prop({ type: String, required: true })
   fn: ReportMetricFn;
 
   @Prop()
@@ -87,7 +87,7 @@ export class SavedReport {
   @Prop()
   groupBy?: string;
 
-  @Prop()
+  @Prop({ type: String })
   groupByGranularity?: ReportGranularity;
 
   @Prop({ type: [SavedReportMetricSchema], default: [] })
