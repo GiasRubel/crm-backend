@@ -9,6 +9,7 @@ import {
   OpportunitySchema,
 } from '../opportunities/opportunity.schema';
 import { Ticket, TicketSchema } from '../tickets/ticket.schema';
+import { UsersModule } from '../users/users.module';
 import { AttachmentsController } from './attachments.controller';
 import { AttachmentsService } from './attachments.service';
 import { Attachment, AttachmentSchema } from './attachment.schema';
@@ -16,6 +17,7 @@ import { Attachment, AttachmentSchema } from './attachment.schema';
 @Global()
 @Module({
   imports: [
+    UsersModule,
     MongooseModule.forFeature([
       { name: Attachment.name, schema: AttachmentSchema },
       // Read/existence-check-only access — the write paths for these

@@ -10,7 +10,8 @@ import {
 import { InjectModel } from '@nestjs/mongoose';
 import { ConfigService } from '@nestjs/config';
 import { Model, Types } from 'mongoose';
-import { AuditActor, AuditService } from '../audit/audit.service';
+import type { AuditActor } from '../audit/audit.service';
+import { AuditService } from '../audit/audit.service';
 import type { KeycloakJwtPayload } from '../auth/interfaces/keycloak-jwt-payload.interface';
 import { KeycloakAdminService } from '../keycloak-admin/keycloak-admin.service';
 import { generateLocalSubjectId } from '../auth/local/local-subject-id.util';

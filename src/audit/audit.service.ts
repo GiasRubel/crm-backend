@@ -2,7 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import type { KeycloakJwtPayload } from '../auth/interfaces/keycloak-jwt-payload.interface';
-import { UsersService } from '../users/users.service';
+import { AppRole } from '../users/app-role.enum';
+import { User, UserDocument } from '../users/users.schema';
 import {
   AuditAction,
   AuditEntityType,
@@ -46,7 +47,8 @@ export class AuditService {
   constructor(
     @InjectModel(AuditLog.name)
     private readonly auditLogModel: Model<AuditLogDocument>,
-    private readonly usersService: UsersService,
+    @InjectModel(User.name)
+    private readonly userModel: Model<UserDocument>,
   ) {}
 
   /**
@@ -148,8 +150,12 @@ export class AuditService {
           .map((i) => i.actorId!),
       ),
     ];
-    const staff =
-      await this.usersService.findStaffByKeycloakIds(missingNameIds);
+    const staff = await this.userModel
+      .find({
+        keycloakId: { $in: missingNameIds },
+        role: { $ne: AppRole.Customer },
+      })
+      .exec();
     const staffNames = new Map(
       staff.map((u) => [
         u.keycloakId,

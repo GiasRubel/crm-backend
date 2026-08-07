@@ -16,6 +16,8 @@ import { OtpModule } from '../otp/otp.module';
     // staff — forwardRef breaks the genuine two-way module cycle.
     forwardRef(() => OrganizationsModule),
     OtpModule,
+    // AuditModule is @Global() and no longer imports UsersModule (it reads
+    // the User model directly), so this is a one-way dependency — no cycle.
   ],
   providers: [UsersService],
   controllers: [UsersController],
