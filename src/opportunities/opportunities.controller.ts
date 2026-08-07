@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Header,
   HttpCode,
   HttpStatus,
   Param,
@@ -49,6 +50,19 @@ export class OpportunitiesController {
     @CurrentOrg() organizationId: Types.ObjectId,
   ) {
     return this.opportunitiesService.findAll(query, user.sub, organizationId);
+  }
+
+  /** CSV export of opportunities matching the current list filters (capped, not paginated). */
+  @Get('export')
+  @Roles(AppRole.Admin, AppRole.Administrator, AppRole.User)
+  @Header('Content-Type', 'text/csv; charset=utf-8')
+  @Header('Content-Disposition', 'attachment; filename="opportunities.csv"')
+  exportCsv(
+    @Query() query: OpportunityQueryDto,
+    @CurrentUser() user: KeycloakJwtPayload,
+    @CurrentOrg() organizationId: Types.ObjectId,
+  ) {
+    return this.opportunitiesService.exportCsv(query, user.sub, organizationId);
   }
 
   /** Kanban board: one column per pipeline stage, with value totals. */

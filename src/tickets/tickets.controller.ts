@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Header,
   HttpCode,
   HttpStatus,
   Param,
@@ -91,6 +92,19 @@ export class TicketsController {
     @CurrentOrg() organizationId: Types.ObjectId,
   ) {
     return this.ticketsService.findAll(query, user.sub, organizationId);
+  }
+
+  /** CSV export of tickets matching the current list filters (capped, not paginated). */
+  @Get('export')
+  @Roles(AppRole.Admin, AppRole.Administrator, AppRole.User)
+  @Header('Content-Type', 'text/csv; charset=utf-8')
+  @Header('Content-Disposition', 'attachment; filename="tickets.csv"')
+  exportCsv(
+    @Query() query: TicketQueryDto,
+    @CurrentUser() user: KeycloakJwtPayload,
+    @CurrentOrg() organizationId: Types.ObjectId,
+  ) {
+    return this.ticketsService.exportCsv(query, user.sub, organizationId);
   }
 
   @Get('stats')

@@ -7,6 +7,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
 import { isValidObjectId, Model, Types } from 'mongoose';
 import { AccountsService } from '../accounts/accounts.service';
 import {
@@ -16,6 +18,12 @@ import {
   omitFields,
 } from '../audit/audit.service';
 import { CustomFieldsService } from '../custom-fields/custom-fields.service';
+import { parseCsvToRecords, toCsv } from '../import-export/csv.util';
+import {
+  ImportResultDto,
+  MAX_IMPORT_ROWS,
+  runImport,
+} from '../import-export/import-result.dto';
 import { CustomersService } from '../customers/customers.service';
 import { CrmEventBus } from '../events/crm-event-bus.service';
 import { TeamDocument } from '../teams/team.schema';
@@ -36,6 +44,9 @@ import { toContactResponseDto } from './mappers/contact.mapper';
 function escapeRegExp(input: string): string {
   return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
+
+/** Cap CSV exports at a sane row count to keep the response fast and memory-bounded. */
+const EXPORT_ROW_LIMIT = 5000;
 
 /** Top-level fields tracked for the update-diff audit entry. */
 const CONTACT_AUDIT_FIELDS = [
@@ -159,15 +170,11 @@ export class ContactsService {
 
   // ── Read ────────────────────────────────────────────────────────────────
 
-  async findAll(
+  private async buildListFilter(
     query: ContactQueryDto,
     requesterKeycloakId: string,
     organizationId: Types.ObjectId,
-  ) {
-    const page = query.page ?? 1;
-    const limit = query.limit ?? 10;
-    const skip = (page - 1) * limit;
-
+  ): Promise<Record<string, unknown>> {
     const conditions: Record<string, unknown>[] = [{ organizationId }];
 
     if (query.search?.trim()) {
@@ -201,12 +208,27 @@ export class ContactsService {
     );
     if (visibility) conditions.push(visibility);
 
-    const filter: Record<string, unknown> =
-      conditions.length === 0
-        ? {}
-        : conditions.length === 1
-          ? conditions[0]
-          : { $and: conditions };
+    return conditions.length === 0
+      ? {}
+      : conditions.length === 1
+        ? conditions[0]
+        : { $and: conditions };
+  }
+
+  async findAll(
+    query: ContactQueryDto,
+    requesterKeycloakId: string,
+    organizationId: Types.ObjectId,
+  ) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 10;
+    const skip = (page - 1) * limit;
+
+    const filter = await this.buildListFilter(
+      query,
+      requesterKeycloakId,
+      organizationId,
+    );
 
     const sortBy = query.sortBy ?? 'createdAt';
     const direction = query.sortOrder === 'asc' ? 1 : -1;
@@ -792,5 +814,87 @@ export class ContactsService {
       throw new NotFoundException(`Contact with ID ${id} not found`);
     }
     return contact;
+  }
+
+  // ── Import / export ─────────────────────────────────────────────────────
+
+  async exportCsv(
+    query: ContactQueryDto,
+    requesterKeycloakId: string,
+    organizationId: Types.ObjectId,
+  ): Promise<string> {
+    const filter = await this.buildListFilter(
+      query,
+      requesterKeycloakId,
+      organizationId,
+    );
+    const contacts = await this.contactModel
+      .find(filter)
+      .sort({ createdAt: -1 })
+      .limit(EXPORT_ROW_LIMIT)
+      .exec();
+
+    const header = [
+      'First Name',
+      'Last Name',
+      'Email',
+      'Phone',
+      'Job Title',
+      'Department',
+      'City',
+      'Country',
+      'Preferred Channel',
+      'Do Not Contact',
+      'Created At',
+    ];
+    const rows = contacts.map((c) => [
+      c.firstName,
+      c.lastName,
+      c.email,
+      c.phone ?? '',
+      c.jobTitle ?? '',
+      c.department ?? '',
+      c.city ?? '',
+      c.country ?? '',
+      c.preferredChannel,
+      c.doNotContact ? 'true' : 'false',
+      c.createdAt?.toISOString() ?? '',
+    ]);
+    return toCsv(header, rows);
+  }
+
+  async importCsv(
+    fileBuffer: Buffer,
+    createdBy: string,
+    organizationId: Types.ObjectId,
+  ): Promise<ImportResultDto> {
+    const { records } = parseCsvToRecords(fileBuffer.toString('utf-8'));
+    if (records.length > MAX_IMPORT_ROWS) {
+      throw new BadRequestException(
+        `CSV exceeds the ${MAX_IMPORT_ROWS}-row import limit`,
+      );
+    }
+
+    return runImport(records, async (record) => {
+      const dto = plainToInstance(CreateContactDto, {
+        firstName: record.firstname || record['first name'],
+        lastName: record.lastname || record['last name'],
+        email: record.email,
+        phone: record.phone || undefined,
+        jobTitle: record.jobtitle || record['job title'] || undefined,
+        department: record.department || undefined,
+        city: record.city || undefined,
+        country: record.country || undefined,
+      });
+      const validationErrors = await validate(dto, { whitelist: true });
+      if (validationErrors.length > 0) {
+        throw new BadRequestException(
+          validationErrors
+            .map((e) => Object.values(e.constraints ?? {}).join('; '))
+            .join('; '),
+        );
+      }
+      await this.create(dto, createdBy, organizationId);
+    });
   }
 }

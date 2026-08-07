@@ -8,6 +8,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
 import { isValidObjectId, Model, Types } from 'mongoose';
 import {
   AuditActor,
@@ -16,6 +18,12 @@ import {
   omitFields,
 } from '../audit/audit.service';
 import { CustomFieldsService } from '../custom-fields/custom-fields.service';
+import {
+  ImportResultDto,
+  MAX_IMPORT_ROWS,
+  runImport,
+} from '../import-export/import-result.dto';
+import { parseCsvToRecords, toCsv } from '../import-export/csv.util';
 import { CustomersService } from '../customers/customers.service';
 import { CrmEventBus } from '../events/crm-event-bus.service';
 import { OpportunitiesService } from '../opportunities/opportunities.service';
@@ -55,6 +63,9 @@ const CONTACT_ENGAGEMENTS: readonly EngagementType[] = [
   'meeting',
   'email_replied',
 ];
+
+/** Cap CSV exports at a sane row count to keep the response fast and memory-bounded. */
+const EXPORT_ROW_LIMIT = 5000;
 
 /** Top-level fields tracked for the update-diff audit entry. */
 const LEAD_AUDIT_FIELDS = [
@@ -239,15 +250,11 @@ export class LeadsService {
 
   // ── Read ────────────────────────────────────────────────────────────────
 
-  async findAll(
+  private async buildListFilter(
     query: LeadQueryDto,
     requesterKeycloakId: string,
     organizationId: Types.ObjectId,
-  ) {
-    const page = query.page ?? 1;
-    const limit = query.limit ?? 10;
-    const skip = (page - 1) * limit;
-
+  ): Promise<Record<string, unknown>> {
     const conditions: Record<string, unknown>[] = [{ organizationId }];
 
     if (query.search?.trim()) {
@@ -273,12 +280,27 @@ export class LeadsService {
     );
     if (visibility) conditions.push(visibility);
 
-    const filter: Record<string, unknown> =
-      conditions.length === 0
-        ? {}
-        : conditions.length === 1
-          ? conditions[0]
-          : { $and: conditions };
+    return conditions.length === 0
+      ? {}
+      : conditions.length === 1
+        ? conditions[0]
+        : { $and: conditions };
+  }
+
+  async findAll(
+    query: LeadQueryDto,
+    requesterKeycloakId: string,
+    organizationId: Types.ObjectId,
+  ) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 10;
+    const skip = (page - 1) * limit;
+
+    const filter = await this.buildListFilter(
+      query,
+      requesterKeycloakId,
+      organizationId,
+    );
 
     const sortBy = query.sortBy ?? 'createdAt';
     const direction = query.sortOrder === 'asc' ? 1 : -1;
@@ -987,5 +1009,94 @@ export class LeadsService {
       throw new NotFoundException(`Lead with ID ${id} not found`);
     }
     return lead;
+  }
+
+  // ── Import / export ─────────────────────────────────────────────────────
+
+  async exportCsv(
+    query: LeadQueryDto,
+    requesterKeycloakId: string,
+    organizationId: Types.ObjectId,
+  ): Promise<string> {
+    const filter = await this.buildListFilter(
+      query,
+      requesterKeycloakId,
+      organizationId,
+    );
+    const leads = await this.leadModel
+      .find(filter)
+      .sort({ createdAt: -1 })
+      .limit(EXPORT_ROW_LIMIT)
+      .exec();
+
+    const header = [
+      'First Name',
+      'Last Name',
+      'Email',
+      'Phone',
+      'Company',
+      'Job Title',
+      'Source',
+      'Status',
+      'Score',
+      'Estimated Value',
+      'Notes',
+      'Created At',
+    ];
+    const rows = leads.map((l) => [
+      l.firstName,
+      l.lastName,
+      l.email,
+      l.phone ?? '',
+      l.company ?? '',
+      l.jobTitle ?? '',
+      l.source,
+      l.status,
+      l.score,
+      l.estimatedValue ?? '',
+      l.notes ?? '',
+      l.createdAt?.toISOString() ?? '',
+    ]);
+    return toCsv(header, rows);
+  }
+
+  async importCsv(
+    fileBuffer: Buffer,
+    createdBy: string,
+    organizationId: Types.ObjectId,
+  ): Promise<ImportResultDto> {
+    const { records } = parseCsvToRecords(fileBuffer.toString('utf-8'));
+    if (records.length > MAX_IMPORT_ROWS) {
+      throw new BadRequestException(
+        `CSV exceeds the ${MAX_IMPORT_ROWS}-row import limit`,
+      );
+    }
+
+    return runImport(records, async (record) => {
+      const dto = plainToInstance(CreateLeadDto, {
+        firstName: record.firstname || record['first name'],
+        lastName: record.lastname || record['last name'],
+        email: record.email,
+        phone: record.phone || undefined,
+        company: record.company || undefined,
+        jobTitle: record.jobtitle || record['job title'] || undefined,
+        notes: record.notes || undefined,
+        source: record.source || undefined,
+        estimatedValue: record.estimatedvalue
+          ? Number(record.estimatedvalue)
+          : record['estimated value']
+            ? Number(record['estimated value'])
+            : undefined,
+      });
+      const validationErrors = await validate(dto, { whitelist: true });
+      if (validationErrors.length > 0) {
+        throw new BadRequestException(
+          validationErrors
+            .map((e) => Object.values(e.constraints ?? {}).join('; '))
+            .join('; '),
+        );
+      }
+      await this.create(dto, createdBy, organizationId);
+    });
   }
 }

@@ -16,6 +16,7 @@ import {
 import { CustomFieldsService } from '../custom-fields/custom-fields.service';
 import { CustomersService } from '../customers/customers.service';
 import { CrmEventBus } from '../events/crm-event-bus.service';
+import { toCsv } from '../import-export/csv.util';
 import { KbService } from '../kb/kb.service';
 import { TeamDocument } from '../teams/team.schema';
 import { TeamsService } from '../teams/teams.service';
@@ -45,6 +46,9 @@ import {
 function escapeRegExp(input: string): string {
   return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
+
+/** Cap CSV exports at a sane row count to keep the response fast and memory-bounded. */
+const EXPORT_ROW_LIMIT = 5000;
 
 @Injectable()
 export class TicketsService {
@@ -115,15 +119,11 @@ export class TicketsService {
     return this.mapOne(ticket);
   }
 
-  async findAll(
+  private async buildListFilter(
     query: TicketQueryDto,
     requesterKeycloakId: string,
     organizationId: Types.ObjectId,
-  ) {
-    const page = query.page ?? 1;
-    const limit = query.limit ?? 10;
-    const skip = (page - 1) * limit;
-
+  ): Promise<Record<string, unknown>> {
     const conditions: Record<string, unknown>[] = [{ organizationId }];
 
     if (query.search?.trim()) {
@@ -154,12 +154,27 @@ export class TicketsService {
     );
     if (visibility) conditions.push(visibility);
 
-    const filter: Record<string, unknown> =
-      conditions.length === 0
-        ? {}
-        : conditions.length === 1
-          ? conditions[0]
-          : { $and: conditions };
+    return conditions.length === 0
+      ? {}
+      : conditions.length === 1
+        ? conditions[0]
+        : { $and: conditions };
+  }
+
+  async findAll(
+    query: TicketQueryDto,
+    requesterKeycloakId: string,
+    organizationId: Types.ObjectId,
+  ) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 10;
+    const skip = (page - 1) * limit;
+
+    const filter = await this.buildListFilter(
+      query,
+      requesterKeycloakId,
+      organizationId,
+    );
 
     const sortBy = query.sortBy ?? 'updatedAt';
     const direction = query.sortOrder === 'asc' ? 1 : -1;
@@ -874,5 +889,46 @@ export class TicketsService {
       throw new NotFoundException(`Ticket with ID ${id} not found`);
     }
     return ticket;
+  }
+
+  // ── Export ───────────────────────────────────────────────────────────────
+
+  async exportCsv(
+    query: TicketQueryDto,
+    requesterKeycloakId: string,
+    organizationId: Types.ObjectId,
+  ): Promise<string> {
+    const filter = await this.buildListFilter(
+      query,
+      requesterKeycloakId,
+      organizationId,
+    );
+    const tickets = await this.ticketModel
+      .find(filter)
+      .sort({ updatedAt: -1 })
+      .limit(EXPORT_ROW_LIMIT)
+      .exec();
+
+    const header = [
+      'Number',
+      'Subject',
+      'Type',
+      'Status',
+      'Priority',
+      'Resolved At',
+      'Closed At',
+      'Created At',
+    ];
+    const rows = tickets.map((t) => [
+      t.number,
+      t.subject,
+      t.type,
+      t.status,
+      t.priority,
+      t.resolvedAt?.toISOString() ?? '',
+      t.closedAt?.toISOString() ?? '',
+      t.createdAt?.toISOString() ?? '',
+    ]);
+    return toCsv(header, rows);
   }
 }

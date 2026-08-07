@@ -12,6 +12,7 @@ import { isValidObjectId, Model, Types } from 'mongoose';
 import { AuditActor, AuditService, diffFields } from '../audit/audit.service';
 import { CustomFieldsService } from '../custom-fields/custom-fields.service';
 import { CrmEventBus } from '../events/crm-event-bus.service';
+import { toCsv } from '../import-export/csv.util';
 import { KeycloakAdminService } from '../keycloak-admin/keycloak-admin.service';
 import { TeamDocument } from '../teams/team.schema';
 import { TeamsService } from '../teams/teams.service';
@@ -30,6 +31,9 @@ import { toCustomerResponseDto } from './mappers/customer.mapper';
 function escapeRegExp(input: string): string {
   return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
+
+/** Cap CSV exports at a sane row count to keep the response fast and memory-bounded. */
+const EXPORT_ROW_LIMIT = 5000;
 
 /** Top-level fields tracked for the update-diff audit entry. */
 const CUSTOMER_AUDIT_FIELDS = [
@@ -219,15 +223,11 @@ export class CustomersService {
     }
   }
 
-  async findAll(
+  private async buildListFilter(
     query: CustomerQueryDto,
     requesterKeycloakId: string,
     organizationId: Types.ObjectId,
-  ) {
-    const page = query.page ?? 1;
-    const limit = query.limit ?? 10;
-    const skip = (page - 1) * limit;
-
+  ): Promise<Record<string, unknown>> {
     const conditions: Record<string, unknown>[] = [{ organizationId }];
 
     if (query.search?.trim()) {
@@ -256,12 +256,27 @@ export class CustomersService {
       conditions.push(visibility);
     }
 
-    const filter: Record<string, unknown> =
-      conditions.length === 0
-        ? {}
-        : conditions.length === 1
-          ? conditions[0]
-          : { $and: conditions };
+    return conditions.length === 0
+      ? {}
+      : conditions.length === 1
+        ? conditions[0]
+        : { $and: conditions };
+  }
+
+  async findAll(
+    query: CustomerQueryDto,
+    requesterKeycloakId: string,
+    organizationId: Types.ObjectId,
+  ) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 10;
+    const skip = (page - 1) * limit;
+
+    const filter = await this.buildListFilter(
+      query,
+      requesterKeycloakId,
+      organizationId,
+    );
 
     const sortBy = query.sortBy ?? 'createdAt';
     const direction = query.sortOrder === 'asc' ? 1 : -1;
@@ -839,5 +854,44 @@ export class CustomersService {
       throw new NotFoundException(`Customer with ID ${id} not found`);
     }
     return customer;
+  }
+
+  // ── Export ───────────────────────────────────────────────────────────────
+
+  async exportCsv(
+    query: CustomerQueryDto,
+    requesterKeycloakId: string,
+    organizationId: Types.ObjectId,
+  ): Promise<string> {
+    const filter = await this.buildListFilter(
+      query,
+      requesterKeycloakId,
+      organizationId,
+    );
+    const customers = await this.customerModel
+      .find(filter)
+      .sort({ createdAt: -1 })
+      .limit(EXPORT_ROW_LIMIT)
+      .exec();
+
+    const header = [
+      'First Name',
+      'Last Name',
+      'Email',
+      'Phone',
+      'Company',
+      'Status',
+      'Created At',
+    ];
+    const rows = customers.map((c) => [
+      c.firstName,
+      c.lastName,
+      c.email,
+      c.phone ?? '',
+      c.company ?? '',
+      c.status,
+      c.createdAt?.toISOString() ?? '',
+    ]);
+    return toCsv(header, rows);
   }
 }

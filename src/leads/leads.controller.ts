@@ -1,15 +1,20 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
   Get,
+  Header,
   HttpCode,
   HttpStatus,
   Param,
   Patch,
   Post,
   Query,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { Types } from 'mongoose';
 import { actorFromJwt } from '../audit/audit.service';
@@ -65,6 +70,36 @@ export class LeadsController {
     @CurrentOrg() organizationId: Types.ObjectId,
   ) {
     return this.leadsService.findAll(query, user.sub, organizationId);
+  }
+
+  /** CSV export of leads matching the current list filters (capped, not paginated). */
+  @Get('export')
+  @ApiBearerAuth('access-token')
+  @Roles(AppRole.Admin, AppRole.Administrator, AppRole.User)
+  @Header('Content-Type', 'text/csv; charset=utf-8')
+  @Header('Content-Disposition', 'attachment; filename="leads.csv"')
+  exportCsv(
+    @Query() query: LeadQueryDto,
+    @CurrentUser() user: KeycloakJwtPayload,
+    @CurrentOrg() organizationId: Types.ObjectId,
+  ) {
+    return this.leadsService.exportCsv(query, user.sub, organizationId);
+  }
+
+  /** Bulk-create leads from an uploaded CSV file. */
+  @Post('import')
+  @ApiBearerAuth('access-token')
+  @Roles(AppRole.Admin, AppRole.Administrator)
+  @UseInterceptors(
+    FileInterceptor('file', { limits: { fileSize: 2 * 1024 * 1024 } }),
+  )
+  importCsv(
+    @UploadedFile() file: Express.Multer.File | undefined,
+    @CurrentUser() user: KeycloakJwtPayload,
+    @CurrentOrg() organizationId: Types.ObjectId,
+  ) {
+    if (!file) throw new BadRequestException('No CSV file was uploaded');
+    return this.leadsService.importCsv(file.buffer, user.sub, organizationId);
   }
 
   @Get('stats')

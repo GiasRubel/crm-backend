@@ -17,6 +17,7 @@ import {
 import { CustomFieldsService } from '../custom-fields/custom-fields.service';
 import { CustomersService } from '../customers/customers.service';
 import { CrmEventBus } from '../events/crm-event-bus.service';
+import { toCsv } from '../import-export/csv.util';
 import { TeamDocument } from '../teams/team.schema';
 import { TeamsService } from '../teams/teams.service';
 import { AppRole } from '../users/app-role.enum';
@@ -48,6 +49,9 @@ function escapeRegExp(input: string): string {
 
 /** Cards per column returned by the Kanban board endpoint. */
 const BOARD_COLUMN_LIMIT = 100;
+
+/** Cap CSV exports at a sane row count to keep the response fast and memory-bounded. */
+const EXPORT_ROW_LIMIT = 5000;
 
 /** Top-level fields tracked for the update-diff audit entry. */
 const OPPORTUNITY_AUDIT_FIELDS = [
@@ -160,15 +164,11 @@ export class OpportunitiesService {
 
   // ── Read ────────────────────────────────────────────────────────────────
 
-  async findAll(
+  private async buildListFilter(
     query: OpportunityQueryDto,
     requesterKeycloakId: string,
     organizationId: Types.ObjectId,
-  ) {
-    const page = query.page ?? 1;
-    const limit = query.limit ?? 10;
-    const skip = (page - 1) * limit;
-
+  ): Promise<Record<string, unknown>> {
     const conditions: Record<string, unknown>[] = [{ organizationId }];
 
     if (query.search?.trim()) {
@@ -189,12 +189,27 @@ export class OpportunitiesService {
     );
     if (visibility) conditions.push(visibility);
 
-    const filter: Record<string, unknown> =
-      conditions.length === 0
-        ? {}
-        : conditions.length === 1
-          ? conditions[0]
-          : { $and: conditions };
+    return conditions.length === 0
+      ? {}
+      : conditions.length === 1
+        ? conditions[0]
+        : { $and: conditions };
+  }
+
+  async findAll(
+    query: OpportunityQueryDto,
+    requesterKeycloakId: string,
+    organizationId: Types.ObjectId,
+  ) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 10;
+    const skip = (page - 1) * limit;
+
+    const filter = await this.buildListFilter(
+      query,
+      requesterKeycloakId,
+      organizationId,
+    );
 
     const sortBy = query.sortBy ?? 'createdAt';
     const direction = query.sortOrder === 'asc' ? 1 : -1;
@@ -827,5 +842,44 @@ export class OpportunitiesService {
       throw new NotFoundException(`Opportunity with ID ${id} not found`);
     }
     return opportunity;
+  }
+
+  // ── Export ───────────────────────────────────────────────────────────────
+
+  async exportCsv(
+    query: OpportunityQueryDto,
+    requesterKeycloakId: string,
+    organizationId: Types.ObjectId,
+  ): Promise<string> {
+    const filter = await this.buildListFilter(
+      query,
+      requesterKeycloakId,
+      organizationId,
+    );
+    const opportunities = await this.opportunityModel
+      .find(filter)
+      .sort({ createdAt: -1 })
+      .limit(EXPORT_ROW_LIMIT)
+      .exec();
+
+    const header = [
+      'Name',
+      'Stage',
+      'Amount',
+      'Probability',
+      'Expected Close Date',
+      'Closed At',
+      'Created At',
+    ];
+    const rows = opportunities.map((o) => [
+      o.name,
+      o.stage,
+      o.amount,
+      o.probability,
+      o.expectedCloseDate?.toISOString() ?? '',
+      o.closedAt?.toISOString() ?? '',
+      o.createdAt?.toISOString() ?? '',
+    ]);
+    return toCsv(header, rows);
   }
 }

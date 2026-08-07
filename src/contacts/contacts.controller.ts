@@ -1,15 +1,20 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
   Get,
+  Header,
   HttpCode,
   HttpStatus,
   Param,
   Patch,
   Post,
   Query,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { Types } from 'mongoose';
 import { actorFromJwt } from '../audit/audit.service';
@@ -49,6 +54,38 @@ export class ContactsController {
     @CurrentOrg() organizationId: Types.ObjectId,
   ) {
     return this.contactsService.findAll(query, user.sub, organizationId);
+  }
+
+  /** CSV export of contacts matching the current list filters (capped, not paginated). */
+  @Get('export')
+  @Roles(AppRole.Admin, AppRole.Administrator, AppRole.User)
+  @Header('Content-Type', 'text/csv; charset=utf-8')
+  @Header('Content-Disposition', 'attachment; filename="contacts.csv"')
+  exportCsv(
+    @Query() query: ContactQueryDto,
+    @CurrentUser() user: KeycloakJwtPayload,
+    @CurrentOrg() organizationId: Types.ObjectId,
+  ) {
+    return this.contactsService.exportCsv(query, user.sub, organizationId);
+  }
+
+  /** Bulk-create contacts from an uploaded CSV file. */
+  @Post('import')
+  @Roles(AppRole.Admin, AppRole.Administrator)
+  @UseInterceptors(
+    FileInterceptor('file', { limits: { fileSize: 2 * 1024 * 1024 } }),
+  )
+  importCsv(
+    @UploadedFile() file: Express.Multer.File | undefined,
+    @CurrentUser() user: KeycloakJwtPayload,
+    @CurrentOrg() organizationId: Types.ObjectId,
+  ) {
+    if (!file) throw new BadRequestException('No CSV file was uploaded');
+    return this.contactsService.importCsv(
+      file.buffer,
+      user.sub,
+      organizationId,
+    );
   }
 
   @Get('stats')

@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Header,
   HttpCode,
   HttpStatus,
   Param,
@@ -48,6 +49,19 @@ export class CustomersController {
     @CurrentOrg() organizationId: Types.ObjectId,
   ) {
     return this.customersService.findAll(query, user.sub, organizationId);
+  }
+
+  /** CSV export of customers matching the current list filters (capped, not paginated). */
+  @Get('export')
+  @Roles(AppRole.Admin, AppRole.Administrator, AppRole.User)
+  @Header('Content-Type', 'text/csv; charset=utf-8')
+  @Header('Content-Disposition', 'attachment; filename="customers.csv"')
+  exportCsv(
+    @Query() query: CustomerQueryDto,
+    @CurrentUser() user: KeycloakJwtPayload,
+    @CurrentOrg() organizationId: Types.ObjectId,
+  ) {
+    return this.customersService.exportCsv(query, user.sub, organizationId);
   }
 
   @Get('stats')
