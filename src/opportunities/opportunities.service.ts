@@ -1,6 +1,5 @@
 import {
   BadRequestException,
-  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
@@ -19,9 +18,10 @@ import { CustomersService } from '../customers/customers.service';
 import { CrmEventBus } from '../events/crm-event-bus.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { toCsv } from '../import-export/csv.util';
+import type { FieldRestrictionInfo } from '../roles/permissions.service';
+import { PermissionsService } from '../roles/permissions.service';
 import { TeamDocument } from '../teams/team.schema';
 import { TeamsService } from '../teams/teams.service';
-import { AppRole } from '../users/app-role.enum';
 import { UsersService } from '../users/users.service';
 import { AssignOpportunityDto } from './dto/assign-opportunity.dto';
 import { CreateOpportunityDto } from './dto/create-opportunity.dto';
@@ -78,6 +78,7 @@ export class OpportunitiesService {
     private readonly auditService: AuditService,
     private readonly customFieldsService: CustomFieldsService,
     private readonly notificationsService: NotificationsService,
+    private readonly permissionsService: PermissionsService,
   ) {}
 
   /** Publish an opportunity domain event for the automation engine. */
@@ -102,6 +103,12 @@ export class OpportunitiesService {
     createdBy: string,
     organizationId: Types.ObjectId,
   ): Promise<OpportunityResponseDto> {
+    await this.permissionsService.requirePermission(
+      createdBy,
+      organizationId,
+      'opportunity',
+      'create',
+    );
     const customer = await this.customersService.findDocById(dto.customerId);
     if (!customer) {
       throw new BadRequestException('Customer not found');
@@ -221,7 +228,7 @@ export class OpportunitiesService {
       _id: direction,
     };
 
-    const [items, total] = await Promise.all([
+    const [items, total, fieldRestrictions] = await Promise.all([
       this.opportunityModel
         .find(filter)
         .sort(sort)
@@ -229,10 +236,11 @@ export class OpportunitiesService {
         .limit(limit)
         .exec(),
       this.opportunityModel.countDocuments(filter).exec(),
+      this.getFieldRestrictions(requesterKeycloakId, organizationId),
     ]);
 
     return {
-      data: await this.mapMany(items),
+      data: await this.mapMany(items, fieldRestrictions),
       meta: {
         total,
         page,
@@ -248,13 +256,11 @@ export class OpportunitiesService {
    * updated first); `count`/`totalAmount` always reflect the full column.
    */
   async getBoard(requesterKeycloakId: string, organizationId: Types.ObjectId) {
-    const visibility = {
-      organizationId,
-      ...((await this.buildVisibilityFilter(
-        requesterKeycloakId,
-        organizationId,
-      )) ?? {}),
-    };
+    const [visibilityFilter, fieldRestrictions] = await Promise.all([
+      this.buildVisibilityFilter(requesterKeycloakId, organizationId),
+      this.getFieldRestrictions(requesterKeycloakId, organizationId),
+    ]);
+    const visibility = { organizationId, ...(visibilityFilter ?? {}) };
 
     const columns = await Promise.all(
       OPPORTUNITY_STAGES.map(async (stage) => {
@@ -281,7 +287,7 @@ export class OpportunitiesService {
           stage,
           count,
           totalAmount: amountAgg[0]?.total ?? 0,
-          opportunities: await this.mapMany(items),
+          opportunities: await this.mapMany(items, fieldRestrictions),
         };
       }),
     );
@@ -386,7 +392,11 @@ export class OpportunitiesService {
   ): Promise<OpportunityResponseDto> {
     const opportunity = await this.getByIdOrFail(id, organizationId);
     await this.assertCanView(opportunity, requesterKeycloakId, organizationId);
-    return this.mapOne(opportunity);
+    const fieldRestrictions = await this.getFieldRestrictions(
+      requesterKeycloakId,
+      organizationId,
+    );
+    return this.mapOne(opportunity, fieldRestrictions);
   }
 
   // ── Update & pipeline moves ─────────────────────────────────────────────
@@ -397,6 +407,13 @@ export class OpportunitiesService {
     requesterKeycloakId: string,
     organizationId: Types.ObjectId,
   ): Promise<OpportunityResponseDto> {
+    const { fieldRestrictions } =
+      await this.permissionsService.requirePermission(
+        requesterKeycloakId,
+        organizationId,
+        'opportunity',
+        'update',
+      );
     const opportunity = await this.getByIdOrFail(id, organizationId);
     await this.assertCanView(opportunity, requesterKeycloakId, organizationId);
     const before = opportunity.toObject();
@@ -424,11 +441,16 @@ export class OpportunitiesService {
     }
 
     if (dto.customFields !== undefined) {
+      const sanitized = this.permissionsService.stripReadonlyFieldChanges(
+        opportunity.customFields,
+        dto.customFields,
+        fieldRestrictions,
+      );
       opportunity.customFields =
         await this.customFieldsService.validateAndMerge(
           'opportunity',
           opportunity.customFields,
-          dto.customFields,
+          sanitized,
           organizationId,
         );
     }
@@ -469,6 +491,12 @@ export class OpportunitiesService {
     requesterKeycloakId: string,
     organizationId: Types.ObjectId,
   ): Promise<OpportunityResponseDto> {
+    await this.permissionsService.requirePermission(
+      requesterKeycloakId,
+      organizationId,
+      'opportunity',
+      'update',
+    );
     const opportunity = await this.getByIdOrFail(id, organizationId);
     await this.assertCanView(opportunity, requesterKeycloakId, organizationId);
 
@@ -534,6 +562,12 @@ export class OpportunitiesService {
     actor: AuditActor,
     organizationId: Types.ObjectId,
   ): Promise<OpportunityResponseDto> {
+    await this.permissionsService.requirePermission(
+      actor.id ?? '',
+      organizationId,
+      'opportunity',
+      'update',
+    );
     const opportunity = await this.getByIdOrFail(id, organizationId);
 
     const sets: Record<string, unknown> = {};
@@ -633,6 +667,12 @@ export class OpportunitiesService {
     actor: AuditActor,
     organizationId: Types.ObjectId,
   ): Promise<void> {
+    await this.permissionsService.requirePermission(
+      actor.id ?? '',
+      organizationId,
+      'opportunity',
+      'delete',
+    );
     const opportunity = await this.getByIdOrFail(id, organizationId);
     await this.opportunityModel.deleteOne({ _id: opportunity._id }).exec();
     this.logger.log(`Opportunity deleted: ${id}`);
@@ -648,41 +688,28 @@ export class OpportunitiesService {
     });
   }
 
-  // ── Row-level visibility (same model as CustomersService) ──────────────
+  // ── Row-level visibility (governed by PermissionsService) ──────────────
 
-  /**
-   * Build the Mongo filter limiting what the caller may see.
-   * Returns null for Admin/Administrator (unrestricted). Regular staff
-   * (AppRole.User) see records they own, records routed to one of their
-   * active teams, or records they created.
-   */
   private async buildVisibilityFilter(
     keycloakId: string,
     organizationId: Types.ObjectId,
   ): Promise<Record<string, unknown> | null> {
-    const appUser = await this.usersService.findByKeycloakId(keycloakId);
-    if (!appUser) {
-      throw new ForbiddenException('No app user record for this account');
-    }
-
-    if (
-      appUser.role === AppRole.Admin ||
-      appUser.role === AppRole.Administrator
-    ) {
-      return null;
-    }
-
+    const { scope } = await this.permissionsService.requirePermission(
+      keycloakId,
+      organizationId,
+      'opportunity',
+      'read',
+    );
+    if (scope === 'all') return null;
     const teamIds = await this.teamsService.getTeamIdsForMember(
       keycloakId,
       organizationId,
     );
-    return {
-      $or: [
-        { assignedToId: keycloakId },
-        { assignedTeamId: { $in: teamIds } },
-        { createdBy: keycloakId },
-      ],
-    };
+    return this.permissionsService.buildVisibilityFilter(
+      scope,
+      keycloakId,
+      teamIds,
+    );
   }
 
   /** 404 (not 403) outside the caller's scope, to avoid leaking existence. */
@@ -691,34 +718,37 @@ export class OpportunitiesService {
     keycloakId: string,
     organizationId: Types.ObjectId,
   ): Promise<void> {
-    const appUser = await this.usersService.findByKeycloakId(keycloakId);
-    if (!appUser) {
-      throw new ForbiddenException('No app user record for this account');
+    const { scope } = await this.permissionsService.requirePermission(
+      keycloakId,
+      organizationId,
+      'opportunity',
+      'read',
+    );
+    const inScope = await this.permissionsService.isRecordInScope(
+      scope,
+      keycloakId,
+      organizationId,
+      opportunity,
+    );
+    if (!inScope) {
+      throw new NotFoundException(
+        `Opportunity with ID ${opportunity._id.toString()} not found`,
+      );
     }
-    if (
-      appUser.role === AppRole.Admin ||
-      appUser.role === AppRole.Administrator
-    ) {
-      return;
-    }
-    if (
-      opportunity.assignedToId === keycloakId ||
-      opportunity.createdBy === keycloakId
-    ) {
-      return;
-    }
-    if (opportunity.assignedTeamId) {
-      const teamIds = await this.teamsService.getTeamIdsForMember(
+  }
+
+  private async getFieldRestrictions(
+    keycloakId: string,
+    organizationId: Types.ObjectId,
+  ): Promise<Map<string, FieldRestrictionInfo>> {
+    const { fieldRestrictions } =
+      await this.permissionsService.getEffectivePermission(
         keycloakId,
         organizationId,
+        'opportunity',
+        'read',
       );
-      if (teamIds.some((teamId) => teamId.equals(opportunity.assignedTeamId))) {
-        return;
-      }
-    }
-    throw new NotFoundException(
-      `Opportunity with ID ${opportunity._id.toString()} not found`,
-    );
+    return fieldRestrictions;
   }
 
   // ── Assignment helpers ──────────────────────────────────────────────────
@@ -778,14 +808,16 @@ export class OpportunitiesService {
 
   private async mapOne(
     opportunity: OpportunityDocument,
+    fieldRestrictions?: Map<string, FieldRestrictionInfo>,
   ): Promise<OpportunityResponseDto> {
-    const [dto] = await this.mapMany([opportunity]);
+    const [dto] = await this.mapMany([opportunity], fieldRestrictions);
     return dto;
   }
 
   /** Batch-denormalize staff/team/customer names (one lookup per collection per page). */
   private async mapMany(
     opportunities: OpportunityDocument[],
+    fieldRestrictions: Map<string, FieldRestrictionInfo> = new Map(),
   ): Promise<OpportunityResponseDto[]> {
     if (opportunities.length === 0) return [];
 
@@ -831,14 +863,20 @@ export class OpportunitiesService {
       ]),
     );
 
-    return opportunities.map((o) =>
-      toOpportunityResponseDto(o, {
+    return opportunities.map((o) => {
+      const dto = toOpportunityResponseDto(o, {
         staffNames,
         teamNames,
         customerNames,
         accountNames,
-      }),
-    );
+      });
+      dto.customFields =
+        this.permissionsService.applyFieldVisibility(
+          dto.customFields,
+          fieldRestrictions,
+        ) ?? {};
+      return dto;
+    });
   }
 
   /** Load an opportunity by id, rejecting malformed ids with a 404 instead of a Mongoose CastError (500). */

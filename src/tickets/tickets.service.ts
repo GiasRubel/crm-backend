@@ -19,9 +19,10 @@ import { CrmEventBus } from '../events/crm-event-bus.service';
 import { toCsv } from '../import-export/csv.util';
 import { KbService } from '../kb/kb.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import type { FieldRestrictionInfo } from '../roles/permissions.service';
+import { PermissionsService } from '../roles/permissions.service';
 import { TeamDocument } from '../teams/team.schema';
 import { TeamsService } from '../teams/teams.service';
-import { AppRole } from '../users/app-role.enum';
 import { UsersService } from '../users/users.service';
 import {
   AddMyTicketCommentDto,
@@ -68,6 +69,7 @@ export class TicketsService {
     private readonly auditService: AuditService,
     private readonly customFieldsService: CustomFieldsService,
     private readonly notificationsService: NotificationsService,
+    private readonly permissionsService: PermissionsService,
   ) {}
 
   // ── Staff: create / read ────────────────────────────────────────────────
@@ -77,6 +79,12 @@ export class TicketsService {
     createdBy: string,
     organizationId: Types.ObjectId,
   ): Promise<TicketResponseDto> {
+    await this.permissionsService.requirePermission(
+      createdBy,
+      organizationId,
+      'ticket',
+      'create',
+    );
     const customer = await this.customersService.findDocById(dto.customerId);
     if (!customer) {
       throw new BadRequestException('Customer not found');
@@ -186,13 +194,14 @@ export class TicketsService {
       _id: direction,
     };
 
-    const [items, total] = await Promise.all([
+    const [items, total, fieldRestrictions] = await Promise.all([
       this.ticketModel.find(filter).sort(sort).skip(skip).limit(limit).exec(),
       this.ticketModel.countDocuments(filter).exec(),
+      this.getFieldRestrictions(requesterKeycloakId, organizationId),
     ]);
 
     return {
-      data: await this.mapMany(items),
+      data: await this.mapMany(items, { fieldRestrictions }),
       meta: {
         total,
         page,
@@ -307,7 +316,11 @@ export class TicketsService {
   ): Promise<TicketResponseDto> {
     const ticket = await this.getByIdOrFail(id, organizationId);
     await this.assertCanView(ticket, requesterKeycloakId, organizationId);
-    return this.mapOne(ticket);
+    const fieldRestrictions = await this.getFieldRestrictions(
+      requesterKeycloakId,
+      organizationId,
+    );
+    return this.mapOne(ticket, { fieldRestrictions });
   }
 
   // ── Staff: update / status / comments / routing / delete ───────────────
@@ -318,6 +331,13 @@ export class TicketsService {
     requesterKeycloakId: string,
     organizationId: Types.ObjectId,
   ): Promise<TicketResponseDto> {
+    const { fieldRestrictions } =
+      await this.permissionsService.requirePermission(
+        requesterKeycloakId,
+        organizationId,
+        'ticket',
+        'update',
+      );
     const ticket = await this.getByIdOrFail(id, organizationId);
     await this.assertCanView(ticket, requesterKeycloakId, organizationId);
 
@@ -341,10 +361,15 @@ export class TicketsService {
     }
 
     if (dto.customFields !== undefined) {
+      const sanitized = this.permissionsService.stripReadonlyFieldChanges(
+        ticket.customFields,
+        dto.customFields,
+        fieldRestrictions,
+      );
       ticket.customFields = await this.customFieldsService.validateAndMerge(
         'ticket',
         ticket.customFields,
-        dto.customFields,
+        sanitized,
         organizationId,
       );
     }
@@ -361,6 +386,12 @@ export class TicketsService {
     requesterKeycloakId: string,
     organizationId: Types.ObjectId,
   ): Promise<TicketResponseDto> {
+    await this.permissionsService.requirePermission(
+      requesterKeycloakId,
+      organizationId,
+      'ticket',
+      'update',
+    );
     const ticket = await this.getByIdOrFail(id, organizationId);
     await this.assertCanView(ticket, requesterKeycloakId, organizationId);
     if (ticket.status === dto.status) return this.mapOne(ticket);
@@ -390,6 +421,12 @@ export class TicketsService {
     requesterKeycloakId: string,
     organizationId: Types.ObjectId,
   ): Promise<TicketResponseDto> {
+    await this.permissionsService.requirePermission(
+      requesterKeycloakId,
+      organizationId,
+      'ticket',
+      'update',
+    );
     const ticket = await this.getByIdOrFail(id, organizationId);
     await this.assertCanView(ticket, requesterKeycloakId, organizationId);
     if (ticket.status === 'closed') {
@@ -437,6 +474,12 @@ export class TicketsService {
     actor: AuditActor,
     organizationId: Types.ObjectId,
   ): Promise<TicketResponseDto> {
+    await this.permissionsService.requirePermission(
+      actor.id ?? '',
+      organizationId,
+      'ticket',
+      'update',
+    );
     const ticket = await this.getByIdOrFail(id, organizationId);
 
     const sets: Record<string, unknown> = {};
@@ -535,6 +578,12 @@ export class TicketsService {
     actor: AuditActor,
     organizationId: Types.ObjectId,
   ): Promise<void> {
+    await this.permissionsService.requirePermission(
+      actor.id ?? '',
+      organizationId,
+      'ticket',
+      'delete',
+    );
     const ticket = await this.getByIdOrFail(id, organizationId);
     await this.ticketModel.deleteOne({ _id: ticket._id }).exec();
     this.logger.log(`Ticket deleted: ${ticket.number}`);
@@ -689,30 +738,26 @@ export class TicketsService {
     keycloakId: string,
     organizationId: Types.ObjectId,
   ): Promise<Record<string, unknown> | null> {
-    const appUser = await this.usersService.findByKeycloakId(keycloakId);
-    if (!appUser) {
-      throw new ForbiddenException('No app user record for this account');
-    }
-
-    if (
-      appUser.role === AppRole.Admin ||
-      appUser.role === AppRole.Administrator
-    ) {
-      return null;
-    }
-
+    const { scope } = await this.permissionsService.requirePermission(
+      keycloakId,
+      organizationId,
+      'ticket',
+      'read',
+    );
+    if (scope === 'all') return null;
     const teamIds = await this.teamsService.getTeamIdsForMember(
       keycloakId,
       organizationId,
     );
+    const base = this.permissionsService.buildVisibilityFilter(
+      scope,
+      keycloakId,
+      teamIds,
+    ) as { $or: Record<string, unknown>[] };
     return {
-      $or: [
-        { assignedToId: keycloakId },
-        { assignedTeamId: { $in: teamIds } },
-        { createdBy: keycloakId },
-        // Support triage: unowned tickets are visible to all staff
-        { assignedToId: { $exists: false } },
-      ],
+      // Support triage: unowned tickets are visible to all staff regardless
+      // of scope — this is a workflow exception, not a security boundary.
+      $or: [...base.$or, { assignedToId: { $exists: false } }],
     };
   }
 
@@ -722,35 +767,38 @@ export class TicketsService {
     keycloakId: string,
     organizationId: Types.ObjectId,
   ): Promise<void> {
-    const appUser = await this.usersService.findByKeycloakId(keycloakId);
-    if (!appUser) {
-      throw new ForbiddenException('No app user record for this account');
+    const { scope } = await this.permissionsService.requirePermission(
+      keycloakId,
+      organizationId,
+      'ticket',
+      'read',
+    );
+    if (!ticket.assignedToId) return; // unowned = triage queue, visible to all staff
+    const inScope = await this.permissionsService.isRecordInScope(
+      scope,
+      keycloakId,
+      organizationId,
+      ticket,
+    );
+    if (!inScope) {
+      throw new NotFoundException(
+        `Ticket with ID ${ticket._id.toString()} not found`,
+      );
     }
-    if (
-      appUser.role === AppRole.Admin ||
-      appUser.role === AppRole.Administrator
-    ) {
-      return;
-    }
-    if (
-      ticket.assignedToId === keycloakId ||
-      ticket.createdBy === keycloakId ||
-      !ticket.assignedToId // unowned = triage queue, visible to all staff
-    ) {
-      return;
-    }
-    if (ticket.assignedTeamId) {
-      const teamIds = await this.teamsService.getTeamIdsForMember(
+  }
+
+  private async getFieldRestrictions(
+    keycloakId: string,
+    organizationId: Types.ObjectId,
+  ): Promise<Map<string, FieldRestrictionInfo>> {
+    const { fieldRestrictions } =
+      await this.permissionsService.getEffectivePermission(
         keycloakId,
         organizationId,
+        'ticket',
+        'read',
       );
-      if (teamIds.some((teamId) => teamId.equals(ticket.assignedTeamId))) {
-        return;
-      }
-    }
-    throw new NotFoundException(
-      `Ticket with ID ${ticket._id.toString()} not found`,
-    );
+    return fieldRestrictions;
   }
 
   // ── Helpers ─────────────────────────────────────────────────────────────
@@ -842,7 +890,10 @@ export class TicketsService {
 
   private async mapOne(
     ticket: TicketDocument,
-    options: { forCustomer?: boolean } = {},
+    options: {
+      forCustomer?: boolean;
+      fieldRestrictions?: Map<string, FieldRestrictionInfo>;
+    } = {},
   ): Promise<TicketResponseDto> {
     const [dto] = await this.mapMany([ticket], options);
     return dto;
@@ -851,7 +902,10 @@ export class TicketsService {
   /** Batch-denormalize names + article titles; strips internal notes for customers. */
   private async mapMany(
     tickets: TicketDocument[],
-    options: { forCustomer?: boolean } = {},
+    options: {
+      forCustomer?: boolean;
+      fieldRestrictions?: Map<string, FieldRestrictionInfo>;
+    } = {},
   ): Promise<TicketResponseDto[]> {
     if (tickets.length === 0) return [];
 
@@ -897,15 +951,23 @@ export class TicketsService {
       ]),
     );
 
-    return tickets.map((t) =>
-      toTicketResponseDto(t, {
+    return tickets.map((t) => {
+      const dto = toTicketResponseDto(t, {
         staffNames,
         teamNames,
         customerNames,
         articleTitles,
         forCustomer: options.forCustomer ?? false,
-      }),
-    );
+      });
+      if (options.fieldRestrictions) {
+        dto.customFields =
+          this.permissionsService.applyFieldVisibility(
+            dto.customFields,
+            options.fieldRestrictions,
+          ) ?? {};
+      }
+      return dto;
+    });
   }
 
   /** Load a ticket by id, rejecting malformed ids with a 404 instead of a Mongoose CastError (500). */

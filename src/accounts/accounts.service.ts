@@ -1,7 +1,6 @@
 import {
   BadRequestException,
   ConflictException,
-  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
@@ -25,9 +24,10 @@ import {
   Opportunity,
   OpportunityDocument,
 } from '../opportunities/opportunity.schema';
+import type { FieldRestrictionInfo } from '../roles/permissions.service';
+import { PermissionsService } from '../roles/permissions.service';
 import { TeamDocument } from '../teams/team.schema';
 import { TeamsService } from '../teams/teams.service';
-import { AppRole } from '../users/app-role.enum';
 import { UsersService } from '../users/users.service';
 import { Account, AccountDocument } from './account.schema';
 import { AccountQueryDto } from './dto/account-query.dto';
@@ -83,6 +83,7 @@ export class AccountsService {
     private readonly auditService: AuditService,
     private readonly customFieldsService: CustomFieldsService,
     private readonly notificationsService: NotificationsService,
+    private readonly permissionsService: PermissionsService,
   ) {}
 
   // ── Create / update ─────────────────────────────────────────────────────
@@ -92,6 +93,12 @@ export class AccountsService {
     createdBy: string,
     organizationId: Types.ObjectId,
   ): Promise<AccountResponseDto> {
+    await this.permissionsService.requirePermission(
+      createdBy,
+      organizationId,
+      'account',
+      'create',
+    );
     await this.assertNameAvailable(dto.name, organizationId);
 
     const assignment = await this.resolveAssignmentTargets(
@@ -142,6 +149,13 @@ export class AccountsService {
     requesterKeycloakId: string,
     organizationId: Types.ObjectId,
   ): Promise<AccountResponseDto> {
+    const { fieldRestrictions } =
+      await this.permissionsService.requirePermission(
+        requesterKeycloakId,
+        organizationId,
+        'account',
+        'update',
+      );
     const account = await this.getByIdOrFail(id, organizationId);
     await this.assertCanView(account, requesterKeycloakId, organizationId);
     const before = account.toObject();
@@ -165,10 +179,15 @@ export class AccountsService {
       account.description = dto.description.trim();
     if (dto.status !== undefined) account.status = dto.status;
     if (dto.customFields !== undefined) {
+      const sanitized = this.permissionsService.stripReadonlyFieldChanges(
+        account.customFields,
+        dto.customFields,
+        fieldRestrictions,
+      );
       account.customFields = await this.customFieldsService.validateAndMerge(
         'account',
         account.customFields,
-        dto.customFields,
+        sanitized,
         organizationId,
       );
     }
@@ -255,13 +274,14 @@ export class AccountsService {
       _id: direction,
     };
 
-    const [items, total] = await Promise.all([
+    const [items, total, fieldRestrictions] = await Promise.all([
       this.accountModel.find(filter).sort(sort).skip(skip).limit(limit).exec(),
       this.accountModel.countDocuments(filter).exec(),
+      this.getFieldRestrictions(requesterKeycloakId, organizationId),
     ]);
 
     return {
-      data: await this.mapMany(items),
+      data: await this.mapMany(items, fieldRestrictions),
       meta: {
         total,
         page,
@@ -321,7 +341,11 @@ export class AccountsService {
   ): Promise<AccountResponseDto> {
     const account = await this.getByIdOrFail(id, organizationId);
     await this.assertCanView(account, requesterKeycloakId, organizationId);
-    return this.mapOne(account);
+    const fieldRestrictions = await this.getFieldRestrictions(
+      requesterKeycloakId,
+      organizationId,
+    );
+    return this.mapOne(account, fieldRestrictions);
   }
 
   /**
@@ -336,6 +360,10 @@ export class AccountsService {
   ): Promise<AccountSummaryDto> {
     const account = await this.getByIdOrFail(id, organizationId);
     await this.assertCanView(account, requesterKeycloakId, organizationId);
+    const fieldRestrictions = await this.getFieldRestrictions(
+      requesterKeycloakId,
+      organizationId,
+    );
 
     const [contacts, contactCount, opportunities, valueAgg] = await Promise.all(
       [
@@ -372,7 +400,7 @@ export class AccountsService {
     );
 
     return {
-      account: await this.mapOne(account),
+      account: await this.mapOne(account, fieldRestrictions),
       contacts: contacts.map((c) => ({
         id: c._id.toString(),
         firstName: c.firstName,
@@ -414,6 +442,12 @@ export class AccountsService {
     actor: AuditActor,
     organizationId: Types.ObjectId,
   ): Promise<AccountResponseDto> {
+    await this.permissionsService.requirePermission(
+      actor.id ?? '',
+      organizationId,
+      'account',
+      'update',
+    );
     const account = await this.getByIdOrFail(id, organizationId);
 
     const sets: Record<string, unknown> = {};
@@ -517,6 +551,12 @@ export class AccountsService {
     actor: AuditActor,
     organizationId: Types.ObjectId,
   ): Promise<void> {
+    await this.permissionsService.requirePermission(
+      actor.id ?? '',
+      organizationId,
+      'account',
+      'delete',
+    );
     const account = await this.getByIdOrFail(id, organizationId);
 
     const [contactResult, opportunityResult] = await Promise.all([
@@ -565,41 +605,28 @@ export class AccountsService {
     return new Map(accounts.map((a) => [a._id.toString(), a.name]));
   }
 
-  // ── Row-level visibility (same model as CustomersService) ──────────────
+  // ── Row-level visibility (governed by PermissionsService) ──────────────
 
-  /**
-   * Build the Mongo filter limiting what the caller may see.
-   * Returns null for Admin/Administrator (unrestricted). Regular staff
-   * (AppRole.User) see records they own, records routed to one of their
-   * active teams, or records they created.
-   */
   private async buildVisibilityFilter(
     keycloakId: string,
     organizationId: Types.ObjectId,
   ): Promise<Record<string, unknown> | null> {
-    const appUser = await this.usersService.findByKeycloakId(keycloakId);
-    if (!appUser) {
-      throw new ForbiddenException('No app user record for this account');
-    }
-
-    if (
-      appUser.role === AppRole.Admin ||
-      appUser.role === AppRole.Administrator
-    ) {
-      return null;
-    }
-
+    const { scope } = await this.permissionsService.requirePermission(
+      keycloakId,
+      organizationId,
+      'account',
+      'read',
+    );
+    if (scope === 'all') return null;
     const teamIds = await this.teamsService.getTeamIdsForMember(
       keycloakId,
       organizationId,
     );
-    return {
-      $or: [
-        { assignedToId: keycloakId },
-        { assignedTeamId: { $in: teamIds } },
-        { createdBy: keycloakId },
-      ],
-    };
+    return this.permissionsService.buildVisibilityFilter(
+      scope,
+      keycloakId,
+      teamIds,
+    );
   }
 
   /** 404 (not 403) outside the caller's scope, to avoid leaking existence. */
@@ -608,34 +635,37 @@ export class AccountsService {
     keycloakId: string,
     organizationId: Types.ObjectId,
   ): Promise<void> {
-    const appUser = await this.usersService.findByKeycloakId(keycloakId);
-    if (!appUser) {
-      throw new ForbiddenException('No app user record for this account');
+    const { scope } = await this.permissionsService.requirePermission(
+      keycloakId,
+      organizationId,
+      'account',
+      'read',
+    );
+    const inScope = await this.permissionsService.isRecordInScope(
+      scope,
+      keycloakId,
+      organizationId,
+      account,
+    );
+    if (!inScope) {
+      throw new NotFoundException(
+        `Account with ID ${account._id.toString()} not found`,
+      );
     }
-    if (
-      appUser.role === AppRole.Admin ||
-      appUser.role === AppRole.Administrator
-    ) {
-      return;
-    }
-    if (
-      account.assignedToId === keycloakId ||
-      account.createdBy === keycloakId
-    ) {
-      return;
-    }
-    if (account.assignedTeamId) {
-      const teamIds = await this.teamsService.getTeamIdsForMember(
+  }
+
+  private async getFieldRestrictions(
+    keycloakId: string,
+    organizationId: Types.ObjectId,
+  ): Promise<Map<string, FieldRestrictionInfo>> {
+    const { fieldRestrictions } =
+      await this.permissionsService.getEffectivePermission(
         keycloakId,
         organizationId,
+        'account',
+        'read',
       );
-      if (teamIds.some((teamId) => teamId.equals(account.assignedTeamId))) {
-        return;
-      }
-    }
-    throw new NotFoundException(
-      `Account with ID ${account._id.toString()} not found`,
-    );
+    return fieldRestrictions;
   }
 
   // ── Helpers ─────────────────────────────────────────────────────────────
@@ -708,14 +738,18 @@ export class AccountsService {
 
   // ── Mapping ─────────────────────────────────────────────────────────────
 
-  private async mapOne(account: AccountDocument): Promise<AccountResponseDto> {
-    const [dto] = await this.mapMany([account]);
+  private async mapOne(
+    account: AccountDocument,
+    fieldRestrictions?: Map<string, FieldRestrictionInfo>,
+  ): Promise<AccountResponseDto> {
+    const [dto] = await this.mapMany([account], fieldRestrictions);
     return dto;
   }
 
   /** Batch-denormalize names and link counts (one lookup per collection per page). */
   private async mapMany(
     accounts: AccountDocument[],
+    fieldRestrictions: Map<string, FieldRestrictionInfo> = new Map(),
   ): Promise<AccountResponseDto[]> {
     if (accounts.length === 0) return [];
 
@@ -771,14 +805,20 @@ export class AccountsService {
       dealAgg.map((d) => [d._id.toString(), d.count]),
     );
 
-    return accounts.map((a) =>
-      toAccountResponseDto(a, {
+    return accounts.map((a) => {
+      const dto = toAccountResponseDto(a, {
         staffNames,
         teamNames,
         contactCounts,
         openDealCounts,
-      }),
-    );
+      });
+      dto.customFields =
+        this.permissionsService.applyFieldVisibility(
+          dto.customFields,
+          fieldRestrictions,
+        ) ?? {};
+      return dto;
+    });
   }
 
   /** Load an account by id, rejecting malformed ids with a 404 instead of a Mongoose CastError (500). */

@@ -32,6 +32,16 @@ export class User {
   @Prop({ type: String, enum: AppRole, default: AppRole.User })
   role: AppRole;
 
+  // Only meaningful when role === AppRole.User — narrows that user's CRUD
+  // access and row-level visibility per the referenced CustomRole's matrix,
+  // instead of the legacy full-access default. See roles/permissions.service.ts.
+  @Prop({
+    type: MongooseSchema.Types.ObjectId,
+    ref: 'CustomRole',
+    default: null,
+  })
+  customRoleId?: Types.ObjectId | null;
+
   // Only set for users of a 'local' authProvider organization. Never exposed
   // by any mapper — see users/mappers/user.mapper.ts.
   @Prop({ type: String, select: false })

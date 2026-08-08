@@ -1,7 +1,6 @@
 import {
   BadRequestException,
   ConflictException,
-  ForbiddenException,
   Injectable,
   InternalServerErrorException,
   Logger,
@@ -15,9 +14,10 @@ import { CrmEventBus } from '../events/crm-event-bus.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { toCsv } from '../import-export/csv.util';
 import { KeycloakAdminService } from '../keycloak-admin/keycloak-admin.service';
+import type { FieldRestrictionInfo } from '../roles/permissions.service';
+import { PermissionsService } from '../roles/permissions.service';
 import { TeamDocument } from '../teams/team.schema';
 import { TeamsService } from '../teams/teams.service';
-import { AppRole } from '../users/app-role.enum';
 import { UsersService } from '../users/users.service';
 import { Customer, CustomerDocument } from './customer.schema';
 import { AssignCustomerDto } from './dto/assign-customer.dto';
@@ -61,6 +61,7 @@ export class CustomersService {
     private readonly auditService: AuditService,
     private readonly customFieldsService: CustomFieldsService,
     private readonly notificationsService: NotificationsService,
+    private readonly permissionsService: PermissionsService,
   ) {}
 
   async create(
@@ -68,6 +69,12 @@ export class CustomersService {
     createdBy: string,
     organizationId: Types.ObjectId,
   ): Promise<CustomerResponseDto> {
+    await this.permissionsService.requirePermission(
+      createdBy,
+      organizationId,
+      'customer',
+      'create',
+    );
     const email = dto.email.trim().toLowerCase();
 
     // 1. Verify email uniqueness in MongoDB collections
@@ -288,13 +295,14 @@ export class CustomersService {
       _id: direction,
     };
 
-    const [items, total] = await Promise.all([
+    const [items, total, fieldRestrictions] = await Promise.all([
       this.customerModel.find(filter).sort(sort).skip(skip).limit(limit).exec(),
       this.customerModel.countDocuments(filter).exec(),
+      this.getFieldRestrictions(requesterKeycloakId, organizationId),
     ]);
 
     return {
-      data: await this.mapMany(items),
+      data: await this.mapMany(items, fieldRestrictions),
       meta: {
         total,
         page,
@@ -355,7 +363,11 @@ export class CustomersService {
   ): Promise<CustomerResponseDto> {
     const customer = await this.getByIdOrFail(id, organizationId);
     await this.assertCanView(customer, requesterKeycloakId, organizationId);
-    return this.mapOne(customer);
+    const fieldRestrictions = await this.getFieldRestrictions(
+      requesterKeycloakId,
+      organizationId,
+    );
+    return this.mapOne(customer, fieldRestrictions);
   }
 
   /** Profile of the currently signed-in customer (Customer role). */
@@ -375,6 +387,13 @@ export class CustomersService {
     actor: AuditActor,
     organizationId: Types.ObjectId,
   ): Promise<CustomerResponseDto> {
+    const { fieldRestrictions } =
+      await this.permissionsService.requirePermission(
+        actor.id ?? '',
+        organizationId,
+        'customer',
+        'update',
+      );
     const customer = await this.getByIdOrFail(id, organizationId);
     const before = customer.toObject();
 
@@ -438,10 +457,15 @@ export class CustomersService {
       keycloakUpdates.enabled = dto.status !== 'inactive';
     }
     if (dto.customFields !== undefined) {
+      const sanitized = this.permissionsService.stripReadonlyFieldChanges(
+        customer.customFields,
+        dto.customFields,
+        fieldRestrictions,
+      );
       updates.customFields = await this.customFieldsService.validateAndMerge(
         'customer',
         customer.customFields,
-        dto.customFields,
+        sanitized,
         organizationId,
       );
     }
@@ -510,6 +534,12 @@ export class CustomersService {
     actor: AuditActor,
     organizationId: Types.ObjectId,
   ): Promise<CustomerResponseDto> {
+    await this.permissionsService.requirePermission(
+      actor.id ?? '',
+      organizationId,
+      'customer',
+      'update',
+    );
     const customer = await this.getByIdOrFail(id, organizationId);
 
     const sets: Record<string, unknown> = {};
@@ -609,6 +639,12 @@ export class CustomersService {
     actor: AuditActor,
     organizationId: Types.ObjectId,
   ): Promise<void> {
+    await this.permissionsService.requirePermission(
+      actor.id ?? '',
+      organizationId,
+      'customer',
+      'delete',
+    );
     const customer = await this.getByIdOrFail(id, organizationId);
 
     // 1. Delete in Keycloak
@@ -682,41 +718,33 @@ export class CustomersService {
     );
   }
 
-  // ── Row-level visibility ────────────────────────────────────────────────
+  // ── Row-level visibility (governed by PermissionsService) ──────────────
 
   /**
-   * Build the Mongo filter limiting what the caller may see.
-   * Returns null for Admin/Administrator (unrestricted). Regular staff
-   * (AppRole.User) see records they own, records routed to one of their
-   * active teams, or records they created.
+   * Build the Mongo filter limiting what the caller may see, per their
+   * effective scope (org-wide for Admin/Administrator or a custom role with
+   * scope 'all'; own+team or own-only otherwise).
    */
   private async buildVisibilityFilter(
     keycloakId: string,
     organizationId: Types.ObjectId,
   ): Promise<Record<string, unknown> | null> {
-    const appUser = await this.usersService.findByKeycloakId(keycloakId);
-    if (!appUser) {
-      throw new ForbiddenException('No app user record for this account');
-    }
-
-    if (
-      appUser.role === AppRole.Admin ||
-      appUser.role === AppRole.Administrator
-    ) {
-      return null;
-    }
-
+    const { scope } = await this.permissionsService.requirePermission(
+      keycloakId,
+      organizationId,
+      'customer',
+      'read',
+    );
+    if (scope === 'all') return null;
     const teamIds = await this.teamsService.getTeamIdsForMember(
       keycloakId,
       organizationId,
     );
-    return {
-      $or: [
-        { assignedToId: keycloakId },
-        { assignedTeamId: { $in: teamIds } },
-        { createdBy: keycloakId },
-      ],
-    };
+    return this.permissionsService.buildVisibilityFilter(
+      scope,
+      keycloakId,
+      teamIds,
+    );
   }
 
   /** 404 (not 403) when a restricted caller reads a record outside their scope, to avoid leaking existence. */
@@ -725,34 +753,37 @@ export class CustomersService {
     keycloakId: string,
     organizationId: Types.ObjectId,
   ): Promise<void> {
-    const appUser = await this.usersService.findByKeycloakId(keycloakId);
-    if (!appUser) {
-      throw new ForbiddenException('No app user record for this account');
+    const { scope } = await this.permissionsService.requirePermission(
+      keycloakId,
+      organizationId,
+      'customer',
+      'read',
+    );
+    const inScope = await this.permissionsService.isRecordInScope(
+      scope,
+      keycloakId,
+      organizationId,
+      customer,
+    );
+    if (!inScope) {
+      throw new NotFoundException(
+        `Customer with ID ${customer._id.toString()} not found`,
+      );
     }
-    if (
-      appUser.role === AppRole.Admin ||
-      appUser.role === AppRole.Administrator
-    ) {
-      return;
-    }
-    if (
-      customer.assignedToId === keycloakId ||
-      customer.createdBy === keycloakId
-    ) {
-      return;
-    }
-    if (customer.assignedTeamId) {
-      const teamIds = await this.teamsService.getTeamIdsForMember(
+  }
+
+  private async getFieldRestrictions(
+    keycloakId: string,
+    organizationId: Types.ObjectId,
+  ): Promise<Map<string, FieldRestrictionInfo>> {
+    const { fieldRestrictions } =
+      await this.permissionsService.getEffectivePermission(
         keycloakId,
         organizationId,
+        'customer',
+        'read',
       );
-      if (teamIds.some((teamId) => teamId.equals(customer.assignedTeamId))) {
-        return;
-      }
-    }
-    throw new NotFoundException(
-      `Customer with ID ${customer._id.toString()} not found`,
-    );
+    return fieldRestrictions;
   }
 
   // ── Assignment helpers ──────────────────────────────────────────────────
@@ -812,14 +843,16 @@ export class CustomersService {
 
   private async mapOne(
     customer: CustomerDocument,
+    fieldRestrictions?: Map<string, FieldRestrictionInfo>,
   ): Promise<CustomerResponseDto> {
-    const [dto] = await this.mapMany([customer]);
+    const [dto] = await this.mapMany([customer], fieldRestrictions);
     return dto;
   }
 
   /** Batch-denormalize owner/team names into responses (one lookup per collection per page). */
   private async mapMany(
     customers: CustomerDocument[],
+    fieldRestrictions: Map<string, FieldRestrictionInfo> = new Map(),
   ): Promise<CustomerResponseDto[]> {
     if (customers.length === 0) return [];
 
@@ -848,9 +881,15 @@ export class CustomersService {
       ]),
     );
 
-    return customers.map((c) =>
-      toCustomerResponseDto(c, { ownerNames, teamNames }),
-    );
+    return customers.map((c) => {
+      const dto = toCustomerResponseDto(c, { ownerNames, teamNames });
+      dto.customFields =
+        this.permissionsService.applyFieldVisibility(
+          dto.customFields,
+          fieldRestrictions,
+        ) ?? {};
+      return dto;
+    });
   }
 
   /** Load a customer by id, rejecting malformed ids with a 404 instead of a Mongoose CastError (500). */

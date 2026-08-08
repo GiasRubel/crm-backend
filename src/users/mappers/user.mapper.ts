@@ -16,7 +16,9 @@ export function toUserResponseDto(user: UserDocument): UserResponseDto {
 
 export function toStaffUserResponseDto(
   user: UserDocument,
+  customRoleNames: Map<string, string> = new Map(),
 ): StaffUserResponseDto {
+  const customRoleId = user.customRoleId?.toString() ?? null;
   return {
     id: user._id.toString(),
     keycloakId: user.keycloakId,
@@ -24,5 +26,9 @@ export function toStaffUserResponseDto(
     firstName: user.firstName ?? '',
     lastName: user.lastName ?? '',
     role: user.role,
+    customRoleId,
+    customRoleName: customRoleId
+      ? (customRoleNames.get(customRoleId) ?? null)
+      : null,
   };
 }

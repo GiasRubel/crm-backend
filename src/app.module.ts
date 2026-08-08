@@ -28,6 +28,7 @@ import { CustomFieldsModule } from './custom-fields/custom-fields.module';
 import { AttachmentsModule } from './attachments/attachments.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { SearchModule } from './search/search.module';
+import { RolesModule } from './roles/roles.module';
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { SearchModule } from './search/search.module';
     CustomFieldsModule, // Global — CustomFieldsService injectable everywhere
     AttachmentsModule, // Global — AttachmentsService injectable everywhere
     NotificationsModule, // Global — NotificationsService injectable everywhere
+    RolesModule, // Global — PermissionsService/CustomRolesService injectable everywhere
     LicensingModule, // Must run before AuthModule: gates the whole API on activation
     AuthModule,
     UsersModule,

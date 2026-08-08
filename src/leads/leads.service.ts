@@ -1,7 +1,6 @@
 import {
   BadRequestException,
   ConflictException,
-  ForbiddenException,
   Injectable,
   InternalServerErrorException,
   Logger,
@@ -29,9 +28,10 @@ import { CrmEventBus } from '../events/crm-event-bus.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { OpportunitiesService } from '../opportunities/opportunities.service';
 import { OrganizationsService } from '../organizations/organizations.service';
+import type { FieldRestrictionInfo } from '../roles/permissions.service';
+import { PermissionsService } from '../roles/permissions.service';
 import { TeamDocument } from '../teams/team.schema';
 import { TeamsService } from '../teams/teams.service';
-import { AppRole } from '../users/app-role.enum';
 import { UsersService } from '../users/users.service';
 import { AddEngagementDto } from './dto/add-engagement.dto';
 import { AssignLeadDto } from './dto/assign-lead.dto';
@@ -98,6 +98,7 @@ export class LeadsService {
     private readonly auditService: AuditService,
     private readonly customFieldsService: CustomFieldsService,
     private readonly notificationsService: NotificationsService,
+    private readonly permissionsService: PermissionsService,
   ) {}
 
   /** Publish a lead domain event for the automation engine. */
@@ -122,6 +123,12 @@ export class LeadsService {
     createdBy: string,
     organizationId: Types.ObjectId,
   ): Promise<LeadResponseDto> {
+    await this.permissionsService.requirePermission(
+      createdBy,
+      organizationId,
+      'lead',
+      'create',
+    );
     const email = dto.email.trim().toLowerCase();
     await this.assertNoOpenLeadWithEmail(email, organizationId);
 
@@ -312,13 +319,14 @@ export class LeadsService {
       _id: direction,
     };
 
-    const [items, total] = await Promise.all([
+    const [items, total, fieldRestrictions] = await Promise.all([
       this.leadModel.find(filter).sort(sort).skip(skip).limit(limit).exec(),
       this.leadModel.countDocuments(filter).exec(),
+      this.getFieldRestrictions(requesterKeycloakId, organizationId),
     ]);
 
     return {
-      data: await this.mapMany(items),
+      data: await this.mapMany(items, fieldRestrictions),
       meta: {
         total,
         page,
@@ -409,7 +417,11 @@ export class LeadsService {
   ): Promise<LeadResponseDto> {
     const lead = await this.getByIdOrFail(id, organizationId);
     await this.assertCanView(lead, requesterKeycloakId, organizationId);
-    return this.mapOne(lead);
+    const fieldRestrictions = await this.getFieldRestrictions(
+      requesterKeycloakId,
+      organizationId,
+    );
+    return this.mapOne(lead, fieldRestrictions);
   }
 
   // ── Update, qualification & routing ─────────────────────────────────────
@@ -420,6 +432,13 @@ export class LeadsService {
     requesterKeycloakId: string,
     organizationId: Types.ObjectId,
   ): Promise<LeadResponseDto> {
+    const { fieldRestrictions } =
+      await this.permissionsService.requirePermission(
+        requesterKeycloakId,
+        organizationId,
+        'lead',
+        'update',
+      );
     const lead = await this.getByIdOrFail(id, organizationId);
     await this.assertCanView(lead, requesterKeycloakId, organizationId);
     this.assertNotConverted(lead);
@@ -450,10 +469,15 @@ export class LeadsService {
       lead.estimatedValue = dto.estimatedValue;
     if (dto.status !== undefined) lead.status = dto.status;
     if (dto.customFields !== undefined) {
+      const sanitized = this.permissionsService.stripReadonlyFieldChanges(
+        lead.customFields,
+        dto.customFields,
+        fieldRestrictions,
+      );
       lead.customFields = await this.customFieldsService.validateAndMerge(
         'lead',
         lead.customFields,
-        dto.customFields,
+        sanitized,
         organizationId,
       );
     }
@@ -495,6 +519,12 @@ export class LeadsService {
     requesterKeycloakId: string,
     organizationId: Types.ObjectId,
   ): Promise<LeadResponseDto> {
+    await this.permissionsService.requirePermission(
+      requesterKeycloakId,
+      organizationId,
+      'lead',
+      'update',
+    );
     const lead = await this.getByIdOrFail(id, organizationId);
     await this.assertCanView(lead, requesterKeycloakId, organizationId);
     this.assertNotConverted(lead);
@@ -544,6 +574,12 @@ export class LeadsService {
     actor: AuditActor,
     organizationId: Types.ObjectId,
   ): Promise<LeadResponseDto> {
+    await this.permissionsService.requirePermission(
+      actor.id ?? '',
+      organizationId,
+      'lead',
+      'update',
+    );
     const lead = await this.getByIdOrFail(id, organizationId);
     this.assertNotConverted(lead);
 
@@ -651,6 +687,12 @@ export class LeadsService {
     requesterKeycloakId: string,
     organizationId: Types.ObjectId,
   ): Promise<LeadResponseDto> {
+    await this.permissionsService.requirePermission(
+      requesterKeycloakId,
+      organizationId,
+      'lead',
+      'update',
+    );
     const lead = await this.getByIdOrFail(id, organizationId);
     await this.assertCanView(lead, requesterKeycloakId, organizationId);
     this.assertNotConverted(lead);
@@ -788,6 +830,12 @@ export class LeadsService {
     actor: AuditActor,
     organizationId: Types.ObjectId,
   ): Promise<void> {
+    await this.permissionsService.requirePermission(
+      actor.id ?? '',
+      organizationId,
+      'lead',
+      'delete',
+    );
     const lead = await this.getByIdOrFail(id, organizationId);
     await this.leadModel.deleteOne({ _id: lead._id }).exec();
     this.logger.log(`Lead deleted: ${id}`);
@@ -803,41 +851,28 @@ export class LeadsService {
     });
   }
 
-  // ── Row-level visibility (same model as CustomersService) ──────────────
+  // ── Row-level visibility (governed by PermissionsService) ──────────────
 
-  /**
-   * Build the Mongo filter limiting what the caller may see.
-   * Returns null for Admin/Administrator (unrestricted). Regular staff
-   * (AppRole.User) see records they own, records routed to one of their
-   * active teams, or records they created.
-   */
   private async buildVisibilityFilter(
     keycloakId: string,
     organizationId: Types.ObjectId,
   ): Promise<Record<string, unknown> | null> {
-    const appUser = await this.usersService.findByKeycloakId(keycloakId);
-    if (!appUser) {
-      throw new ForbiddenException('No app user record for this account');
-    }
-
-    if (
-      appUser.role === AppRole.Admin ||
-      appUser.role === AppRole.Administrator
-    ) {
-      return null;
-    }
-
+    const { scope } = await this.permissionsService.requirePermission(
+      keycloakId,
+      organizationId,
+      'lead',
+      'read',
+    );
+    if (scope === 'all') return null;
     const teamIds = await this.teamsService.getTeamIdsForMember(
       keycloakId,
       organizationId,
     );
-    return {
-      $or: [
-        { assignedToId: keycloakId },
-        { assignedTeamId: { $in: teamIds } },
-        { createdBy: keycloakId },
-      ],
-    };
+    return this.permissionsService.buildVisibilityFilter(
+      scope,
+      keycloakId,
+      teamIds,
+    );
   }
 
   /** 404 (not 403) outside the caller's scope, to avoid leaking existence. */
@@ -846,31 +881,37 @@ export class LeadsService {
     keycloakId: string,
     organizationId: Types.ObjectId,
   ): Promise<void> {
-    const appUser = await this.usersService.findByKeycloakId(keycloakId);
-    if (!appUser) {
-      throw new ForbiddenException('No app user record for this account');
+    const { scope } = await this.permissionsService.requirePermission(
+      keycloakId,
+      organizationId,
+      'lead',
+      'read',
+    );
+    const inScope = await this.permissionsService.isRecordInScope(
+      scope,
+      keycloakId,
+      organizationId,
+      lead,
+    );
+    if (!inScope) {
+      throw new NotFoundException(
+        `Lead with ID ${lead._id.toString()} not found`,
+      );
     }
-    if (
-      appUser.role === AppRole.Admin ||
-      appUser.role === AppRole.Administrator
-    ) {
-      return;
-    }
-    if (lead.assignedToId === keycloakId || lead.createdBy === keycloakId) {
-      return;
-    }
-    if (lead.assignedTeamId) {
-      const teamIds = await this.teamsService.getTeamIdsForMember(
+  }
+
+  private async getFieldRestrictions(
+    keycloakId: string,
+    organizationId: Types.ObjectId,
+  ): Promise<Map<string, FieldRestrictionInfo>> {
+    const { fieldRestrictions } =
+      await this.permissionsService.getEffectivePermission(
         keycloakId,
         organizationId,
+        'lead',
+        'read',
       );
-      if (teamIds.some((teamId) => teamId.equals(lead.assignedTeamId))) {
-        return;
-      }
-    }
-    throw new NotFoundException(
-      `Lead with ID ${lead._id.toString()} not found`,
-    );
+    return fieldRestrictions;
   }
 
   // ── Helpers ─────────────────────────────────────────────────────────────
@@ -966,13 +1007,19 @@ export class LeadsService {
 
   // ── Mapping ─────────────────────────────────────────────────────────────
 
-  private async mapOne(lead: LeadDocument): Promise<LeadResponseDto> {
-    const [dto] = await this.mapMany([lead]);
+  private async mapOne(
+    lead: LeadDocument,
+    fieldRestrictions?: Map<string, FieldRestrictionInfo>,
+  ): Promise<LeadResponseDto> {
+    const [dto] = await this.mapMany([lead], fieldRestrictions);
     return dto;
   }
 
   /** Batch-denormalize staff/team names into responses (one lookup per collection per page). */
-  private async mapMany(leads: LeadDocument[]): Promise<LeadResponseDto[]> {
+  private async mapMany(
+    leads: LeadDocument[],
+    fieldRestrictions: Map<string, FieldRestrictionInfo> = new Map(),
+  ): Promise<LeadResponseDto[]> {
     if (leads.length === 0) return [];
 
     const staffIds = [
@@ -1005,7 +1052,15 @@ export class LeadsService {
       ]),
     );
 
-    return leads.map((l) => toLeadResponseDto(l, { staffNames, teamNames }));
+    return leads.map((l) => {
+      const dto = toLeadResponseDto(l, { staffNames, teamNames });
+      dto.customFields =
+        this.permissionsService.applyFieldVisibility(
+          dto.customFields,
+          fieldRestrictions,
+        ) ?? {};
+      return dto;
+    });
   }
 
   /** Load a lead by id, rejecting malformed ids with a 404 instead of a Mongoose CastError (500). */

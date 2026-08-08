@@ -7,4 +7,6 @@ export class StaffUserResponseDto {
   firstName: string;
   lastName: string;
   role: AppRole;
+  customRoleId: string | null;
+  customRoleName: string | null;
 }

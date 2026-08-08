@@ -6,10 +6,17 @@ import { UsersController } from './users.controller';
 import { BootstrapModule } from '../bootstrap/bootstrap.module';
 import { OrganizationsModule } from '../organizations/organizations.module';
 import { OtpModule } from '../otp/otp.module';
+import { CustomRole, CustomRoleSchema } from '../roles/custom-role.schema';
 
 @Module({
   imports: [
-    MongooseModule.forFeature([{ name: User.name, schema: UserSchema }]),
+    MongooseModule.forFeature([
+      { name: User.name, schema: UserSchema },
+      // Read-only: validating/denormalizing a staff member's custom role.
+      // Avoids a module cycle with the (Global) RolesModule, which itself
+      // depends on UsersService.
+      { name: CustomRole.name, schema: CustomRoleSchema },
+    ]),
     BootstrapModule,
     // Organizations already imports UsersModule (admin-provisioning); Users
     // needs Organizations back to read an org's authProvider when creating

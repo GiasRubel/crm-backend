@@ -6,15 +6,17 @@ import {
   Inject,
   Injectable,
   Logger,
+  NotFoundException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { ConfigService } from '@nestjs/config';
-import { Model, Types } from 'mongoose';
+import { isValidObjectId, Model, Types } from 'mongoose';
 import type { AuditActor } from '../audit/audit.service';
 import { AuditService } from '../audit/audit.service';
 import type { KeycloakJwtPayload } from '../auth/interfaces/keycloak-jwt-payload.interface';
 import { KeycloakAdminService } from '../keycloak-admin/keycloak-admin.service';
 import { generateLocalSubjectId } from '../auth/local/local-subject-id.util';
+import { CustomRole, CustomRoleDocument } from '../roles/custom-role.schema';
 import { AppRole } from './app-role.enum';
 import { CreateStaffDto } from './dto/create-staff.dto';
 import { StaffUserResponseDto } from './dto/staff-user-response.dto';
@@ -35,6 +37,8 @@ export class UsersService {
 
   constructor(
     @InjectModel(User.name) private userModel: Model<UserDocument>,
+    @InjectModel(CustomRole.name)
+    private readonly customRoleModel: Model<CustomRoleDocument>,
     private readonly configService: ConfigService,
     private readonly defaultOrgService: DefaultOrgService,
     private readonly keycloakAdminService: KeycloakAdminService,
@@ -172,6 +176,89 @@ export class UsersService {
       .find({ role: { $ne: AppRole.Customer } })
       .sort({ firstName: 1, lastName: 1 })
       .exec();
+  }
+
+  /** Staff directory for the Users admin page, with custom role names denormalized. */
+  async findAllStaffWithRoleNames(): Promise<StaffUserResponseDto[]> {
+    const staff = await this.findAllStaff();
+    const roleIds = [
+      ...new Set(
+        staff
+          .map((u) => u.customRoleId?.toString())
+          .filter((v): v is string => !!v),
+      ),
+    ];
+    const roleNames = roleIds.length
+      ? await this.customRoleModel
+          .find({ _id: { $in: roleIds } })
+          .select('name')
+          .exec()
+      : [];
+    const namesById = new Map(roleNames.map((r) => [r._id.toString(), r.name]));
+    return staff.map((u) => toStaffUserResponseDto(u, namesById));
+  }
+
+  /**
+   * Admin-assigned custom role, narrowing a staff member's access below the
+   * legacy full-access AppRole.User default. Only meaningful for User-tier
+   * staff — Admin/Administrator/Customer/PlatformAdmin always bypass it.
+   */
+  async setCustomRole(
+    id: string,
+    customRoleId: string | null,
+    actor: AuditActor,
+    organizationId: Types.ObjectId,
+  ): Promise<StaffUserResponseDto> {
+    if (!isValidObjectId(id)) {
+      throw new NotFoundException(`User with ID ${id} not found`);
+    }
+    const user = await this.userModel
+      .findOne({ _id: id, organizationId })
+      .exec();
+    if (!user) {
+      throw new NotFoundException(`User with ID ${id} not found`);
+    }
+    if (user.role !== AppRole.User) {
+      throw new BadRequestException(
+        'Custom roles can only be assigned to staff with the User role',
+      );
+    }
+
+    let roleName: string | null = null;
+    if (customRoleId) {
+      if (!isValidObjectId(customRoleId)) {
+        throw new BadRequestException('Role not found');
+      }
+      const role = await this.customRoleModel
+        .findOne({ _id: customRoleId, organizationId })
+        .exec();
+      if (!role) {
+        throw new BadRequestException('Role not found');
+      }
+      roleName = role.name;
+      user.customRoleId = role._id;
+    } else {
+      user.customRoleId = null;
+    }
+    await user.save();
+
+    this.logger.log(
+      `User ${user.email} custom role set to ${roleName ?? 'none'}`,
+    );
+    void this.auditService.log({
+      organizationId,
+      actor,
+      action: 'update',
+      entityType: 'user',
+      entityId: id,
+      entityLabel: `${user.firstName} ${user.lastName}`,
+      summary: `Set "${user.firstName} ${user.lastName}"'s role to ${roleName ?? '(none — full access)'}`,
+      metadata: { customRoleId, customRoleName: roleName },
+    });
+    return toStaffUserResponseDto(
+      user,
+      roleName ? new Map([[customRoleId as string, roleName]]) : undefined,
+    );
   }
 
   async createCustomerUser(
