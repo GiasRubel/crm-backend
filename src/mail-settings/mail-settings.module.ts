@@ -1,10 +1,11 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
-import { MailService } from './mail.service';
 import {
   OrgMailSettings,
   OrgMailSettingsSchema,
-} from '../mail-settings/org-mail-settings.schema';
+} from './org-mail-settings.schema';
+import { MailSettingsService } from './mail-settings.service';
+import { MailSettingsController } from './mail-settings.controller';
 
 @Module({
   imports: [
@@ -12,7 +13,7 @@ import {
       { name: OrgMailSettings.name, schema: OrgMailSettingsSchema },
     ]),
   ],
-  providers: [MailService],
-  exports: [MailService],
+  controllers: [MailSettingsController],
+  providers: [MailSettingsService],
 })
-export class MailModule {}
+export class MailSettingsModule {}

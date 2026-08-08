@@ -8,6 +8,7 @@ import {
 import { InjectModel } from '@nestjs/mongoose';
 import { isValidObjectId, Model, Types } from 'mongoose';
 import { Account, AccountDocument } from '../accounts/account.schema';
+import { CalendarSyncService } from '../calendar-sync/calendar-sync.service';
 import { Contact, ContactDocument } from '../contacts/contact.schema';
 import { Customer, CustomerDocument } from '../customers/customer.schema';
 import { CrmEventBus } from '../events/crm-event-bus.service';
@@ -102,7 +103,31 @@ export class ActivitiesService {
     private readonly usersService: UsersService,
     private readonly teamsService: TeamsService,
     private readonly eventBus: CrmEventBus,
+    private readonly calendarSyncService: CalendarSyncService,
   ) {}
+
+  /** Best-effort push to the assignee's connected calendar — never fails the write. */
+  private async syncToCalendar(activity: ActivityDocument): Promise<void> {
+    try {
+      await this.calendarSyncService.onActivityChanged(activity);
+    } catch (error) {
+      this.logger.error(
+        `Calendar sync push failed for activity ${activity._id.toString()}:`,
+        error,
+      );
+    }
+  }
+
+  private async unsyncFromCalendar(activity: ActivityDocument): Promise<void> {
+    try {
+      await this.calendarSyncService.onActivityDeleted(activity);
+    } catch (error) {
+      this.logger.error(
+        `Calendar sync delete failed for activity ${activity._id.toString()}:`,
+        error,
+      );
+    }
+  }
 
   // ── Create ──────────────────────────────────────────────────────────────
 
@@ -183,6 +208,7 @@ export class ActivitiesService {
     if (activity.status === 'completed') {
       await this.syncCompletedCommunication(activity);
     }
+    await this.syncToCalendar(activity);
 
     this.logger.log(
       `Activity created: ${activity.type} "${activity.subject}" (assigned to ${assignedToId})`,
@@ -402,6 +428,7 @@ export class ActivitiesService {
     this.assertDateRange(activity.startAt, activity.endAt);
 
     await activity.save();
+    await this.syncToCalendar(activity);
     this.logger.log(`Activity updated: ${id}`);
     return this.mapOne(activity);
   }
@@ -427,6 +454,11 @@ export class ActivitiesService {
 
     if (dto.status === 'completed') {
       await this.syncCompletedCommunication(activity);
+    }
+    if (dto.status === 'cancelled') {
+      await this.unsyncFromCalendar(activity);
+    } else {
+      await this.syncToCalendar(activity);
     }
 
     this.logger.log(`Activity ${id} status → ${dto.status}`);
@@ -478,6 +510,7 @@ export class ActivitiesService {
 
   async remove(id: string, organizationId: Types.ObjectId): Promise<void> {
     const activity = await this.getByIdOrFail(id, organizationId);
+    await this.unsyncFromCalendar(activity);
     await this.activityModel.deleteOne({ _id: activity._id }).exec();
     this.logger.log(`Activity deleted: ${id}`);
   }

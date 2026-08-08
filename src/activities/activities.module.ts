@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { Account, AccountSchema } from '../accounts/account.schema';
+import { CalendarSyncModule } from '../calendar-sync/calendar-sync.module';
 import { Contact, ContactSchema } from '../contacts/contact.schema';
 import { Customer, CustomerSchema } from '../customers/customer.schema';
 import { Lead, LeadSchema } from '../leads/lead.schema';
@@ -33,6 +34,7 @@ import { Activity, ActivitySchema } from './activity.schema';
     ]),
     UsersModule,
     TeamsModule,
+    CalendarSyncModule,
   ],
   controllers: [ActivitiesController],
   providers: [ActivitiesService],

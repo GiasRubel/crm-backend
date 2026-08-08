@@ -1,6 +1,22 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model, Types } from 'mongoose';
 import * as nodemailer from 'nodemailer';
+import {
+  OrgMailSettings,
+  OrgMailSettingsDocument,
+} from '../mail-settings/org-mail-settings.schema';
+import {
+  decryptSecret,
+  deriveMailEncryptionKey,
+} from '../mail-settings/crypto.util';
+
+interface ResolvedSender {
+  transporter: nodemailer.Transporter;
+  fromAddress: string;
+  fromName: string;
+}
 
 @Injectable()
 export class MailService {
@@ -8,8 +24,13 @@ export class MailService {
   private readonly transporter: nodemailer.Transporter;
   private readonly fromAddress: string;
   private readonly fromName: string;
+  private readonly encryptionKey: Buffer;
 
-  constructor(private readonly configService: ConfigService) {
+  constructor(
+    private readonly configService: ConfigService,
+    @InjectModel(OrgMailSettings.name)
+    private readonly orgMailSettingsModel: Model<OrgMailSettingsDocument>,
+  ) {
     this.fromAddress = configService.get<string>(
       'MAIL_FROM_ADDRESS',
       'noreply@crmpro.com',
@@ -25,12 +46,67 @@ export class MailService {
         pass: configService.get<string>('MAIL_PASS'),
       },
     });
+
+    this.encryptionKey = deriveMailEncryptionKey(
+      configService.get<string>(
+        'MAIL_SETTINGS_ENCRYPTION_KEY',
+        'dev-mail-settings-encryption-key-change-me',
+      ),
+    );
   }
 
-  async sendOtp(to: string, code: string): Promise<void> {
+  /** Resolve the org's custom SMTP override if configured+enabled, else the system-wide sender. */
+  private async resolveSender(
+    organizationId?: Types.ObjectId | string,
+  ): Promise<ResolvedSender> {
+    const fallback: ResolvedSender = {
+      transporter: this.transporter,
+      fromAddress: this.fromAddress,
+      fromName: this.fromName,
+    };
+    if (!organizationId) return fallback;
+
+    const doc = await this.orgMailSettingsModel
+      .findOne({
+        organizationId: new Types.ObjectId(organizationId.toString()),
+        enabled: true,
+      })
+      .exec();
+    if (!doc?.host || !doc.user || !doc.encryptedPass) return fallback;
+
     try {
-      await this.transporter.sendMail({
-        from: `"${this.fromName}" <${this.fromAddress}>`,
+      return {
+        transporter: nodemailer.createTransport({
+          host: doc.host,
+          port: doc.port ?? 587,
+          secure: doc.secure,
+          auth: {
+            user: doc.user,
+            pass: decryptSecret(doc.encryptedPass, this.encryptionKey),
+          },
+        }),
+        fromAddress: doc.fromAddress || this.fromAddress,
+        fromName: doc.fromName || this.fromName,
+      };
+    } catch (error) {
+      this.logger.error(
+        `Failed to build custom SMTP transporter for org ${organizationId.toString()}, falling back to system mail`,
+        error,
+      );
+      return fallback;
+    }
+  }
+
+  async sendOtp(
+    to: string,
+    code: string,
+    organizationId?: Types.ObjectId | string,
+  ): Promise<void> {
+    const { transporter, fromAddress, fromName } =
+      await this.resolveSender(organizationId);
+    try {
+      await transporter.sendMail({
+        from: `"${fromName}" <${fromAddress}>`,
         to,
         subject: 'Your CRM Pro verification code',
         text: `Your one-time verification code is: ${code}\n\nThis code expires in 5 minutes. Do not share it with anyone.`,
@@ -61,10 +137,17 @@ export class MailService {
   }
 
   /** Generic plain-text mail (used by automation send_email actions). */
-  async sendPlain(to: string, subject: string, text: string): Promise<void> {
+  async sendPlain(
+    to: string,
+    subject: string,
+    text: string,
+    organizationId?: Types.ObjectId | string,
+  ): Promise<void> {
+    const { transporter, fromAddress, fromName } =
+      await this.resolveSender(organizationId);
     try {
-      await this.transporter.sendMail({
-        from: `"${this.fromName}" <${this.fromAddress}>`,
+      await transporter.sendMail({
+        from: `"${fromName}" <${fromAddress}>`,
         to,
         subject,
         text,

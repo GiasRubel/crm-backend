@@ -1,6 +1,8 @@
 import { Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import type { Types } from 'mongoose';
 import { OtpService } from './otp.service';
+import { CurrentOrg } from '../auth/decorators/current-org.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { KeycloakJwtPayload } from '../auth/interfaces/keycloak-jwt-payload.interface';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
@@ -20,11 +22,12 @@ export class OtpController {
   @HttpCode(HttpStatus.OK)
   async send(
     @CurrentUser() user: KeycloakJwtPayload,
+    @CurrentOrg() organizationId: Types.ObjectId | undefined,
   ): Promise<{ message: string }> {
     if (!user.email) {
       return { message: 'No email associated with this account.' };
     }
-    await this.otpService.generateAndSend(user.sub, user.email);
+    await this.otpService.generateAndSend(user.sub, user.email, organizationId);
     return { message: 'OTP sent to your email address.' };
   }
 

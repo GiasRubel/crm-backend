@@ -28,7 +28,11 @@ export class PasswordService {
     const user = await this.usersService.findByEmail(email);
 
     if (user) {
-      await this.otpService.generateAndSend(user.keycloakId, user.email);
+      await this.otpService.generateAndSend(
+        user.keycloakId,
+        user.email,
+        user.organizationId,
+      );
       this.logger.log(`Forgot-password OTP sent to ${email}`);
       void this.auditService.log({
         organizationId: user.organizationId,

@@ -5,7 +5,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { Otp, OtpDocument } from './otp.schema';
 import { MailService } from '../mail/mail.service';
 
@@ -25,7 +25,11 @@ export class OtpService {
    * Generate a 6-digit OTP, store it with TTL, and email it.
    * The `key` is typically the user's Keycloak ID.
    */
-  async generateAndSend(key: string, email: string): Promise<void> {
+  async generateAndSend(
+    key: string,
+    email: string,
+    organizationId?: Types.ObjectId,
+  ): Promise<void> {
     // Replace any existing OTP for this key
     await this.otpModel.deleteOne({ keycloakId: key }).exec();
 
@@ -39,7 +43,7 @@ export class OtpService {
       expiresAt,
     });
     this.logger.log(`OTP generated for ${email}`);
-    await this.mailService.sendOtp(email, code);
+    await this.mailService.sendOtp(email, code, organizationId);
   }
 
   /**

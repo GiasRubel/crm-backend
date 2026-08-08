@@ -103,6 +103,7 @@ src/
   keycloak-admin/         # KeycloakAdminService — admin REST client (GLOBAL module)
   otp/                    # email OTP send/verify
   mail/                   # Nodemailer wrapper (GLOBAL)
+  mail-settings/          # per-org custom SMTP override for outbound mail (admin-only settings + test-send)
   config/                 # DEPLOYMENT_MODE (standalone|saas) flag helper
   bootstrap/              # standalone-mode default Organization/Subscription auto-provisioning
   organizations/          # multi-tenant Organization CRUD + SaaS cross-org provisioning

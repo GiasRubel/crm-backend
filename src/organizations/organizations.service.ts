@@ -172,7 +172,11 @@ export class OrganizationsService {
       // orgs, an OTP (completed via POST /auth/password/reset) for local ones
       try {
         if (isLocal) {
-          await this.otpService.generateAndSend(adminUser.keycloakId, email);
+          await this.otpService.generateAndSend(
+            adminUser.keycloakId,
+            email,
+            organizationId,
+          );
         } else {
           await this.keycloakAdminService.sendSetPasswordEmail(keycloakId!);
         }

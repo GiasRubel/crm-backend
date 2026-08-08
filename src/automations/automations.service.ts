@@ -478,7 +478,12 @@ export class AutomationsService implements OnModuleInit, OnModuleDestroy {
           run.context,
         );
         const body = renderTemplate(action.emailBody ?? '', run.context);
-        await this.mailService.sendPlain(to, subject, body);
+        await this.mailService.sendPlain(
+          to,
+          subject,
+          body,
+          rule.organizationId,
+        );
         return `email "${subject}" → ${to}`;
       }
 

@@ -128,6 +128,29 @@ export class Activity {
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Team', index: true })
   assignedTeamId?: Types.ObjectId;
 
+  /**
+   * Live two-way calendar sync mapping (meetings only — see CalendarSyncService).
+   * `remoteUpdatedAt` is the provider's own last-modified stamp, used to decide
+   * pull-vs-push precedence; `lastPushedAt` guards against push/pull echo loops.
+   */
+  @Prop({
+    type: {
+      connectionId: { type: MongooseSchema.Types.ObjectId, required: true },
+      provider: { type: String, enum: ['google', 'microsoft'], required: true },
+      eventId: { type: String, required: true },
+      remoteUpdatedAt: { type: Date },
+      lastPushedAt: { type: Date },
+    },
+    _id: false,
+  })
+  externalCalendar?: {
+    connectionId: Types.ObjectId;
+    provider: 'google' | 'microsoft';
+    eventId: string;
+    remoteUpdatedAt?: Date;
+    lastPushedAt?: Date;
+  };
+
   // Managed by { timestamps: true }
   createdAt?: Date;
   updatedAt?: Date;
@@ -138,3 +161,7 @@ export const ActivitySchema = SchemaFactory.createForClass(Activity);
 // The task list / timeline is queried by assignee + status + due date
 ActivitySchema.index({ assignedToId: 1, status: 1, dueAt: 1 });
 ActivitySchema.index({ relatedType: 1, relatedId: 1, createdAt: -1 });
+ActivitySchema.index(
+  { 'externalCalendar.connectionId': 1, 'externalCalendar.eventId': 1 },
+  { sparse: true },
+);

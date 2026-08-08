@@ -1,11 +1,13 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
+import { ScheduleModule } from '@nestjs/schedule';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { MailModule } from './mail/mail.module';
+import { MailSettingsModule } from './mail-settings/mail-settings.module';
 import { KeycloakAdminModule } from './keycloak-admin/keycloak-admin.module';
 import { PasswordModule } from './auth/password/password.module';
 import { CustomersModule } from './customers/customers.module';
@@ -15,6 +17,7 @@ import { OpportunitiesModule } from './opportunities/opportunities.module';
 import { AccountsModule } from './accounts/accounts.module';
 import { ContactsModule } from './contacts/contacts.module';
 import { ActivitiesModule } from './activities/activities.module';
+import { CalendarSyncModule } from './calendar-sync/calendar-sync.module';
 import { EventsModule } from './events/events.module';
 import { AutomationsModule } from './automations/automations.module';
 import { KbModule } from './kb/kb.module';
@@ -33,6 +36,7 @@ import { RolesModule } from './roles/roles.module';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    ScheduleModule.forRoot(),
     MongooseModule.forRootAsync({
       useFactory: (configService: ConfigService) => ({
         uri: configService.get<string>('MONGO_URI'),
@@ -52,6 +56,7 @@ import { RolesModule } from './roles/roles.module';
     OrganizationsModule,
     SubscriptionsModule,
     MailModule,
+    MailSettingsModule,
     PasswordModule,
     TeamsModule,
     CustomersModule,
@@ -60,6 +65,7 @@ import { RolesModule } from './roles/roles.module';
     OpportunitiesModule,
     LeadsModule,
     ActivitiesModule,
+    CalendarSyncModule,
     KbModule,
     TicketsModule,
     AutomationsModule,
