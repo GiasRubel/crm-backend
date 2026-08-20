@@ -20,7 +20,11 @@ import type { KeycloakJwtPayload } from '../auth/interfaces/keycloak-jwt-payload
 import { AppRole } from '../users/app-role.enum';
 import { CreateKbArticleDto } from './dto/create-kb-article.dto';
 import { KbFeedbackDto } from './dto/kb-feedback.dto';
-import { KbQueryDto, PublicKbQueryDto } from './dto/kb-query.dto';
+import {
+  KbQueryDto,
+  PublicKbOrgDto,
+  PublicKbQueryDto,
+} from './dto/kb-query.dto';
 import { UpdateKbArticleDto } from './dto/update-kb-article.dto';
 import { KbService } from './kb.service';
 
@@ -41,8 +45,11 @@ export class KbController {
   /** One public article by slug; increments its view counter. */
   @Get('public/:slug')
   @Public()
-  findPublicBySlug(@Param('slug') slug: string) {
-    return this.kbService.findPublicBySlug(slug);
+  findPublicBySlug(
+    @Param('slug') slug: string,
+    @Query() query: PublicKbOrgDto,
+  ) {
+    return this.kbService.findPublicBySlug(slug, query.organizationSlug);
   }
 
   /** Anonymous "was this helpful?" vote. */

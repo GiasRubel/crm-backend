@@ -6,6 +6,14 @@ import { KeycloakAdminService } from '../../keycloak-admin/keycloak-admin.servic
 import { OrganizationsService } from '../../organizations/organizations.service';
 import { LocalAuthService } from '../local/local-auth.service';
 
+/**
+ * One message for every failure mode of the reset step — unknown address, no
+ * pending OTP, wrong code. Anything more specific tells an attacker which
+ * addresses have accounts.
+ */
+const INVALID_RESET_MESSAGE =
+  'That reset code is invalid or has expired. Please request a new one.';
+
 @Injectable()
 export class PasswordService {
   private readonly logger = new Logger(PasswordService.name);
@@ -61,8 +69,12 @@ export class PasswordService {
   ): Promise<{ message: string }> {
     const user = await this.usersService.findByEmail(email);
 
+    // Deliberately the same message the OTP path returns for a wrong or absent
+    // code. "No account found for this email" would turn this endpoint into a
+    // free user-enumeration oracle, undoing the care taken in step 1.
     if (!user) {
-      throw new BadRequestException('No account found for this email address.');
+      this.logger.warn(`Password-reset attempt for unknown email: ${email}`);
+      throw new BadRequestException(INVALID_RESET_MESSAGE);
     }
 
     // Throws BadRequestException / ForbiddenException on invalid/expired OTP

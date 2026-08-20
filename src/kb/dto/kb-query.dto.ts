@@ -2,6 +2,7 @@ import { Type } from 'class-transformer';
 import {
   IsIn,
   IsInt,
+  IsNotEmpty,
   IsOptional,
   IsString,
   Max,
@@ -64,6 +65,16 @@ export class KbQueryDto {
 
 /** Public FAQ browsing (unauthenticated) — search + category only. */
 export class PublicKbQueryDto {
+  /**
+   * Which organisation's FAQ to read. Required: without it these endpoints
+   * return every tenant's public articles to every anonymous caller. Mirrors
+   * CaptureLeadDto.organizationSlug, the other unauthenticated entry point.
+   */
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(100)
+  organizationSlug: string;
+
   @IsString()
   @MaxLength(200)
   @IsOptional()
@@ -73,4 +84,12 @@ export class PublicKbQueryDto {
   @MaxLength(50)
   @IsOptional()
   category?: string;
+}
+
+/** Body of an anonymous "was this helpful?" vote — see KbFeedbackDto for the rest. */
+export class PublicKbOrgDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(100)
+  organizationSlug: string;
 }

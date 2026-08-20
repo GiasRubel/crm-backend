@@ -4,6 +4,8 @@ import { Connection, Model, Types } from 'mongoose';
 import { Organization } from '../../src/organizations/organization.schema';
 import { User } from '../../src/users/users.schema';
 import { AppRole } from '../../src/users/app-role.enum';
+import { Customer } from '../../src/customers/customer.schema';
+import { Team } from '../../src/teams/team.schema';
 
 export function getTestConnection(app: INestApplication): Connection {
   return app.get<Connection>(getConnectionToken());
@@ -58,6 +60,55 @@ export async function seedUser(
     role,
     passwordHash: overrides.passwordHash,
     tokenVersion: overrides.tokenVersion ?? 0,
+  });
+  return doc.toObject();
+}
+
+let customerCounter = 0;
+
+/** A customer in `organizationId`, with every schema-required field filled. */
+export async function seedCustomer(
+  app: INestApplication,
+  organizationId: Types.ObjectId,
+  createdBy: string,
+  overrides: Partial<Customer> = {},
+): Promise<Customer & { _id: Types.ObjectId }> {
+  const model = app.get<Model<Customer>>(getModelToken(Customer.name));
+  customerCounter += 1;
+  const doc = await model.create({
+    organizationId,
+    keycloakId: overrides.keycloakId ?? `kc-e2e-customer-${customerCounter}`,
+    email: overrides.email ?? `e2e-customer-${customerCounter}@example.com`,
+    firstName: overrides.firstName ?? 'Test',
+    lastName: overrides.lastName ?? `Customer${customerCounter}`,
+    phone: overrides.phone ?? '+15550000000',
+    status: overrides.status ?? 'active',
+    createdBy,
+    assignedToId: overrides.assignedToId,
+    assignedTeamId: overrides.assignedTeamId,
+  });
+  return doc.toObject();
+}
+
+let teamCounter = 0;
+
+/** A team in `organizationId`, with every schema-required field filled. */
+export async function seedTeam(
+  app: INestApplication,
+  organizationId: Types.ObjectId,
+  createdBy: string,
+  overrides: Partial<Team> = {},
+): Promise<Team & { _id: Types.ObjectId }> {
+  const model = app.get<Model<Team>>(getModelToken(Team.name));
+  teamCounter += 1;
+  const doc = await model.create({
+    organizationId,
+    name: overrides.name ?? `E2E Team ${teamCounter}`,
+    isActive: overrides.isActive ?? true,
+    memberIds: overrides.memberIds ?? [],
+    leaderId: overrides.leaderId,
+    regions: overrides.regions ?? [],
+    createdBy,
   });
   return doc.toObject();
 }

@@ -4,6 +4,7 @@ import { Public } from '../decorators/public.decorator';
 import { PasswordService } from './password.service';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { ThrottleLogin, ThrottleOtp } from '../../config/throttle';
 
 @ApiTags('auth/password')
 @Controller('auth/password')
@@ -16,6 +17,7 @@ export class PasswordController {
    * Sends a 6-digit OTP to the email if an account exists.
    */
   @Public()
+  @ThrottleOtp()
   @Post('forgot')
   @HttpCode(HttpStatus.OK)
   forgot(@Body() dto: ForgotPasswordDto): Promise<{ message: string }> {
@@ -28,6 +30,7 @@ export class PasswordController {
    * Verifies the OTP and resets the Keycloak password.
    */
   @Public()
+  @ThrottleLogin()
   @Post('reset')
   @HttpCode(HttpStatus.OK)
   reset(@Body() dto: ResetPasswordDto): Promise<{ message: string }> {

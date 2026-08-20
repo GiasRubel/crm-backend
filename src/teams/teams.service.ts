@@ -45,6 +45,7 @@ export class TeamsService {
     await this.assertNameAvailable(name, organizationId);
 
     const { memberIds, leaderId } = await this.resolveMembership(
+      organizationId,
       dto.memberIds ?? [],
       dto.leaderId ?? null,
     );
@@ -222,6 +223,7 @@ export class TeamsService {
       const requestedMembers = dto.memberIds ?? team.memberIds;
 
       const { memberIds, leaderId } = await this.resolveMembership(
+        organizationId,
         requestedMembers,
         requestedLeader,
         // Only auto-clear a stale leader when the leader wasn't explicitly set
@@ -320,17 +322,23 @@ export class TeamsService {
   }
 
   /** Raw team document lookup (null on missing/malformed id). */
-  async findDocById(id: string): Promise<TeamDocument | null> {
+  async findDocById(
+    id: string,
+    organizationId: Types.ObjectId,
+  ): Promise<TeamDocument | null> {
     if (!isValidObjectId(id)) return null;
-    return this.teamModel.findById(id).exec();
+    return this.teamModel.findOne({ _id: id, organizationId }).exec();
   }
 
   /** Map of teamId → team name, for denormalizing names into other responses. */
-  async findNamesByIds(ids: string[]): Promise<Map<string, string>> {
+  async findNamesByIds(
+    ids: string[],
+    organizationId: Types.ObjectId,
+  ): Promise<Map<string, string>> {
     const validIds = ids.filter((id) => isValidObjectId(id));
     if (validIds.length === 0) return new Map();
     const teams = await this.teamModel
-      .find({ _id: { $in: validIds } })
+      .find({ _id: { $in: validIds }, organizationId })
       .select('name')
       .exec();
     return new Map(teams.map((t) => [t._id.toString(), t.name]));
@@ -360,6 +368,7 @@ export class TeamsService {
    *   a stale leader (dropped from members) is cleared when allowed.
    */
   private async resolveMembership(
+    organizationId: Types.ObjectId,
     requestedMemberIds: string[],
     requestedLeaderId: string | null,
     clearStaleLeader = false,
@@ -378,7 +387,10 @@ export class TeamsService {
     }
 
     if (memberIds.length > 0) {
-      const staff = await this.usersService.findStaffByKeycloakIds(memberIds);
+      const staff = await this.usersService.findStaffByKeycloakIds(
+        memberIds,
+        organizationId,
+      );
       if (staff.length !== memberIds.length) {
         const found = new Set(staff.map((u) => u.keycloakId));
         const missing = memberIds.filter((id) => !found.has(id));
@@ -403,11 +415,14 @@ export class TeamsService {
   /** Batch-map documents: one staff lookup + one customer count aggregate per page. */
   private async toResponses(teams: TeamDocument[]): Promise<TeamResponseDto[]> {
     if (teams.length === 0) return [];
+    // Every document in a mapping batch came from one org-scoped query, so
+    // deriving the tenant from the batch itself cannot pick the wrong org.
+    const organizationId = teams[0].organizationId;
 
     const allMemberIds = [...new Set(teams.flatMap((t) => t.memberIds))];
 
     const [staff, counts] = await Promise.all([
-      this.usersService.findStaffByKeycloakIds(allMemberIds),
+      this.usersService.findStaffByKeycloakIds(allMemberIds, organizationId),
       this.customerModel
         .aggregate<{
           _id: Types.ObjectId;

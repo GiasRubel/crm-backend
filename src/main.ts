@@ -1,9 +1,11 @@
-import { ValidationPipe } from '@nestjs/common';
+import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import compression from 'compression';
 import * as express from 'express';
+import helmet from 'helmet';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bodyParser: false });
@@ -23,6 +25,21 @@ async function bootstrap() {
 
   const expressApp = app.getHttpAdapter().getInstance();
   expressApp.set('etag', false);
+  // Trust the reverse proxy in front of us so req.ip — which the rate limiter
+  // keys on — is the real client address rather than the proxy's.
+  expressApp.set('trust proxy', 1);
+
+  // `contentSecurityPolicy: false`: this process serves JSON and file
+  // downloads, never HTML pages of its own, so a CSP here protects nothing and
+  // would only fight the Swagger UI. `nosniff` is the header that matters for
+  // us — see AttachmentsController.download, which streams user-uploaded bytes.
+  app.use(
+    helmet({
+      contentSecurityPolicy: false,
+      crossOriginResourcePolicy: { policy: 'same-site' },
+    }),
+  );
+  app.use(compression());
 
   // Stripe webhook requires raw body for signature verification.
   // Other endpoints use standard JSON body parsing.
@@ -41,20 +58,36 @@ async function bootstrap() {
     next();
   });
 
-  const swaggerConfig = new DocumentBuilder()
-    .setTitle('CRM API')
-    .setDescription('REST API for the CRM backend')
-    .setVersion('1.0')
-    .addBearerAuth(
-      { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
-      'access-token',
-    )
-    .build();
-  const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig);
-  SwaggerModule.setup('api', app, swaggerDocument);
-
   const configService = app.get(ConfigService);
+  const logger = new Logger('Bootstrap');
+
+  // Swagger enumerates every route, DTO field and validation rule — a
+  // reconnaissance gift. Opt in explicitly, and never in production.
+  const swaggerEnabled =
+    configService.get<string>('ENABLE_SWAGGER') === 'true' &&
+    configService.get<string>('NODE_ENV') !== 'production';
+
+  if (swaggerEnabled) {
+    const swaggerConfig = new DocumentBuilder()
+      .setTitle('CRM API')
+      .setDescription('REST API for the CRM backend')
+      .setVersion('1.0')
+      .addBearerAuth(
+        { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
+        'access-token',
+      )
+      .build();
+    const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig);
+    SwaggerModule.setup('api', app, swaggerDocument);
+    logger.warn('Swagger UI is exposed at /api (ENABLE_SWAGGER=true)');
+  }
+
+  // Finish in-flight requests and let @nestjs/schedule cron jobs unwind on
+  // SIGTERM instead of dropping them mid-execution.
+  app.enableShutdownHooks();
+
   const port = configService.get<number>('PORT') ?? 5000;
   await app.listen(port);
+  logger.log(`Listening on port ${port}`);
 }
-bootstrap();
+void bootstrap();

@@ -300,9 +300,12 @@ export class CalendarSyncService {
   /** Best-effort — callers must catch/log, never let this fail the activity write. */
   async onActivityDeleted(activity: ActivityDocument): Promise<void> {
     if (!activity.externalCalendar) return;
-    const connection = await this.connectionModel.findById(
-      activity.externalCalendar.connectionId,
-    );
+    const connection = await this.connectionModel
+      .findOne({
+        _id: activity.externalCalendar.connectionId,
+        organizationId: activity.organizationId,
+      })
+      .exec();
     if (!connection || connection.status !== 'active') return;
 
     const accessToken = await this.getValidAccessToken(connection);
@@ -323,9 +326,12 @@ export class CalendarSyncService {
     activity: ActivityDocument,
   ): Promise<CalendarConnectionDocument | null> {
     if (activity.externalCalendar) {
-      const mapped = await this.connectionModel.findById(
-        activity.externalCalendar.connectionId,
-      );
+      const mapped = await this.connectionModel
+        .findOne({
+          _id: activity.externalCalendar.connectionId,
+          organizationId: activity.organizationId,
+        })
+        .exec();
       if (mapped && mapped.status === 'active') return mapped;
     }
     return this.connectionModel

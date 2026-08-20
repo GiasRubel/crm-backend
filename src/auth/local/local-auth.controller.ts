@@ -6,6 +6,7 @@ import { LocalLoginDto } from './dto/local-login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { ResolveAuthProviderDto } from './dto/resolve-auth-provider.dto';
 import { TokenPairResponseDto } from './dto/token-pair-response.dto';
+import { ThrottleLogin } from '../../config/throttle';
 import { UsersService } from '../../users/users.service';
 import { OrganizationsService } from '../../organizations/organizations.service';
 
@@ -20,6 +21,7 @@ export class LocalAuthController {
 
   /** Public — exchanges email+password for an access/refresh token pair. */
   @Public()
+  @ThrottleLogin()
   @Post('login')
   @HttpCode(HttpStatus.OK)
   login(@Body() dto: LocalLoginDto): Promise<TokenPairResponseDto> {
@@ -28,6 +30,7 @@ export class LocalAuthController {
 
   /** Public — exchanges a still-valid refresh token for a new pair. */
   @Public()
+  @ThrottleLogin()
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
   refresh(@Body() dto: RefreshTokenDto): Promise<TokenPairResponseDto> {
@@ -39,7 +42,10 @@ export class LocalAuthController {
    * for a given email. Defaults to 'keycloak' for unknown emails, the same
    * enumeration-safe non-committal pattern as the forgot-password flow.
    */
+  // Throttled like a login: it answers "does this address have an account
+  // here, and how does it authenticate", which is worth enumerating.
   @Public()
+  @ThrottleLogin()
   @Post('resolve')
   @HttpCode(HttpStatus.OK)
   async resolve(

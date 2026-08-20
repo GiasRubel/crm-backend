@@ -85,12 +85,16 @@ export class TicketsService {
       'ticket',
       'create',
     );
-    const customer = await this.customersService.findDocById(dto.customerId);
+    const customer = await this.customersService.findDocById(
+      dto.customerId,
+      organizationId,
+    );
     if (!customer) {
       throw new BadRequestException('Customer not found');
     }
 
     const assignment = await this.resolveAssignmentTargets(
+      organizationId,
       dto.assignedToId,
       dto.assignedTeamId,
     );
@@ -349,7 +353,7 @@ export class TicketsService {
 
     if (dto.relatedArticleIds !== undefined) {
       for (const articleId of dto.relatedArticleIds) {
-        if (!(await this.kbService.existsById(articleId))) {
+        if (!(await this.kbService.existsById(articleId, organizationId))) {
           throw new BadRequestException(
             `Linked article ${articleId} not found`,
           );
@@ -491,7 +495,7 @@ export class TicketsService {
         unsets.assignedTeamId = '';
         targetTeam = null;
       } else {
-        targetTeam = await this.getActiveTeamOrFail(dto.assignedTeamId);
+        targetTeam = await this.getActiveTeamOrFail(dto.assignedTeamId, organizationId);
         sets.assignedTeamId = targetTeam._id;
       }
     }
@@ -500,7 +504,7 @@ export class TicketsService {
       if (dto.assignedToId === null) {
         unsets.assignedToId = '';
       } else {
-        await this.getStaffUserOrFail(dto.assignedToId);
+        await this.getStaffUserOrFail(dto.assignedToId, organizationId);
         sets.assignedToId = dto.assignedToId;
       }
     }
@@ -521,6 +525,7 @@ export class TicketsService {
         : ticket.assignedTeamId
           ? await this.teamsService.findDocById(
               ticket.assignedTeamId.toString(),
+              organizationId,
             )
           : null;
 
@@ -837,6 +842,7 @@ export class TicketsService {
 
   /** Validate optional routing targets on staff ticket creation. */
   private async resolveAssignmentTargets(
+    organizationId: Types.ObjectId,
     assignedToId?: string,
     assignedTeamId?: string,
   ): Promise<{ assignedToId?: string; assignedTeamId?: Types.ObjectId }> {
@@ -845,12 +851,12 @@ export class TicketsService {
 
     let team: TeamDocument | null = null;
     if (assignedTeamId) {
-      team = await this.getActiveTeamOrFail(assignedTeamId);
+      team = await this.getActiveTeamOrFail(assignedTeamId, organizationId);
       result.assignedTeamId = team._id;
     }
 
     if (assignedToId) {
-      await this.getStaffUserOrFail(assignedToId);
+      await this.getStaffUserOrFail(assignedToId, organizationId);
       if (team && !team.memberIds.includes(assignedToId)) {
         throw new BadRequestException(
           'Ticket owner must be a member of the assigned team',
@@ -862,8 +868,11 @@ export class TicketsService {
     return result;
   }
 
-  private async getActiveTeamOrFail(teamId: string): Promise<TeamDocument> {
-    const team = await this.teamsService.findDocById(teamId);
+  private async getActiveTeamOrFail(
+    teamId: string,
+    organizationId: Types.ObjectId,
+  ): Promise<TeamDocument> {
+    const team = await this.teamsService.findDocById(teamId, organizationId);
     if (!team) {
       throw new BadRequestException('Assigned team not found');
     }
@@ -875,10 +884,14 @@ export class TicketsService {
     return team;
   }
 
-  private async getStaffUserOrFail(keycloakId: string): Promise<void> {
-    const [owner] = await this.usersService.findStaffByKeycloakIds([
-      keycloakId,
-    ]);
+  private async getStaffUserOrFail(
+    keycloakId: string,
+    organizationId: Types.ObjectId,
+  ): Promise<void> {
+    const [owner] = await this.usersService.findStaffByKeycloakIds(
+      [keycloakId],
+      organizationId,
+    );
     if (!owner) {
       throw new BadRequestException(
         'Ticket owner must be an existing staff user',
@@ -908,6 +921,9 @@ export class TicketsService {
     } = {},
   ): Promise<TicketResponseDto[]> {
     if (tickets.length === 0) return [];
+    // Every document in a mapping batch came from one org-scoped query, so
+    // deriving the tenant from the batch itself cannot pick the wrong org.
+    const organizationId = tickets[0].organizationId;
 
     const staffIds = [
       ...new Set(
@@ -938,10 +954,10 @@ export class TicketsService {
     ];
 
     const [staff, teamNames, customerNames, articleTitles] = await Promise.all([
-      this.usersService.findStaffByKeycloakIds(staffIds),
-      this.teamsService.findNamesByIds(teamIds),
-      this.customersService.findNamesByIds(customerIds),
-      this.kbService.findTitlesByIds(articleIds),
+      this.usersService.findStaffByKeycloakIds(staffIds, organizationId),
+      this.teamsService.findNamesByIds(teamIds, organizationId),
+      this.customersService.findNamesByIds(customerIds, organizationId),
+      this.kbService.findTitlesByIds(articleIds, organizationId),
     ]);
 
     const staffNames = new Map(

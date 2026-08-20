@@ -57,7 +57,7 @@ describe('MailSettingsService', () => {
     it('never leaks the encrypted password, only a hasPassword flag', async () => {
       const doc = buildSettingsDoc({
         enabled: true,
-        host: 'smtp.test.com',
+        host: 'smtp.sendgrid.net',
         encryptedPass: encryptSecret('super-secret', encKey),
       });
       model.findOne.mockReturnValue({ exec: jest.fn().mockResolvedValue(doc) });
@@ -77,7 +77,7 @@ describe('MailSettingsService', () => {
         orgId,
         {
           enabled: true,
-          host: 'smtp.test.com',
+          host: 'smtp.sendgrid.net',
           port: 587,
           user: 'user@test.com',
           pass: 'super-secret',
@@ -87,7 +87,7 @@ describe('MailSettingsService', () => {
       );
 
       expect(result.hasPassword).toBe(true);
-      expect(result.host).toBe('smtp.test.com');
+      expect(result.host).toBe('smtp.sendgrid.net');
       expect(auditService.log).toHaveBeenCalledWith(
         expect.objectContaining({ action: 'create', entityType: 'mail_settings' }),
       );
@@ -97,7 +97,7 @@ describe('MailSettingsService', () => {
       const existingEncrypted = encryptSecret('old-secret', encKey);
       const doc = buildSettingsDoc({
         enabled: true,
-        host: 'smtp.test.com',
+        host: 'smtp.sendgrid.net',
         user: 'user@test.com',
         fromAddress: 'noreply@test.com',
         encryptedPass: existingEncrypted,
@@ -138,7 +138,7 @@ describe('MailSettingsService', () => {
     it('sends a test email through a transporter built from the saved config', async () => {
       const doc = buildSettingsDoc({
         enabled: true,
-        host: 'smtp.test.com',
+        host: 'smtp.sendgrid.net',
         port: 587,
         user: 'user@test.com',
         fromAddress: 'noreply@test.com',
@@ -153,7 +153,7 @@ describe('MailSettingsService', () => {
 
       expect(nodemailer.createTransport).toHaveBeenCalledWith(
         expect.objectContaining({
-          host: 'smtp.test.com',
+          host: 'smtp.sendgrid.net',
           auth: { user: 'user@test.com', pass: 'super-secret' },
         }),
       );
@@ -165,7 +165,7 @@ describe('MailSettingsService', () => {
     it('wraps a transporter failure in a BadRequestException', async () => {
       const doc = buildSettingsDoc({
         enabled: true,
-        host: 'smtp.test.com',
+        host: 'smtp.sendgrid.net',
         user: 'user@test.com',
         fromAddress: 'noreply@test.com',
         encryptedPass: encryptSecret('super-secret', encKey),

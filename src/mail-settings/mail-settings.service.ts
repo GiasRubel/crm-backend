@@ -16,6 +16,10 @@ import {
   deriveMailEncryptionKey,
   encryptSecret,
 } from './crypto.util';
+import {
+  assertSmtpHostAllowed,
+  assertSmtpPortAllowed,
+} from './smtp-host-allowlist';
 
 const AUDITED_FIELDS = [
   'enabled',
@@ -31,6 +35,8 @@ const AUDITED_FIELDS = [
 export class MailSettingsService {
   private readonly logger = new Logger(MailSettingsService.name);
   private readonly encryptionKey: Buffer;
+  /** Extra hosts the *server operator* permits — org admins cannot add to this. */
+  private readonly hostAllowlist: string | undefined;
 
   constructor(
     @InjectModel(OrgMailSettings.name)
@@ -43,6 +49,7 @@ export class MailSettingsService {
       'dev-mail-settings-encryption-key-change-me',
     );
     this.encryptionKey = deriveMailEncryptionKey(secret);
+    this.hostAllowlist = configService.get<string>('MAIL_SMTP_HOST_ALLOWLIST');
   }
 
   async getResponse(
@@ -65,8 +72,16 @@ export class MailSettingsService {
     }
 
     if (dto.enabled !== undefined) doc.enabled = dto.enabled;
-    if (dto.host !== undefined) doc.host = dto.host.trim();
-    if (dto.port !== undefined) doc.port = dto.port;
+    // Validate before assigning, so a rejected host is never persisted — the
+    // stored value is what sendTest and MailService later dial.
+    if (dto.host !== undefined) {
+      assertSmtpHostAllowed(dto.host, this.hostAllowlist);
+      doc.host = dto.host.trim();
+    }
+    if (dto.port !== undefined) {
+      assertSmtpPortAllowed(dto.port);
+      doc.port = dto.port;
+    }
     if (dto.secure !== undefined) doc.secure = dto.secure;
     if (dto.user !== undefined) doc.user = dto.user.trim();
     if (dto.pass)
@@ -108,6 +123,12 @@ export class MailSettingsService {
         'Enable and save custom SMTP settings before sending a test email.',
       );
     }
+
+    // Re-checked at dial time, not just at save time: settings saved before this
+    // allowlist existed, or written directly to the database, must not become an
+    // outbound connection either.
+    assertSmtpHostAllowed(doc.host, this.hostAllowlist);
+    assertSmtpPortAllowed(doc.port ?? 587);
 
     const transporter = nodemailer.createTransport({
       host: doc.host,

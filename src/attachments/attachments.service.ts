@@ -247,8 +247,14 @@ export class AttachmentsService {
     attachments: AttachmentDocument[],
   ): Promise<AttachmentResponseDto[]> {
     if (attachments.length === 0) return [];
+    // Every document in a mapping batch came from one org-scoped query, so
+    // deriving the tenant from the batch itself cannot pick the wrong org.
+    const organizationId = attachments[0].organizationId;
     const staffIds = [...new Set(attachments.map((a) => a.uploadedBy))];
-    const staff = await this.usersService.findStaffByKeycloakIds(staffIds);
+    const staff = await this.usersService.findStaffByKeycloakIds(
+      staffIds,
+      organizationId,
+    );
     const uploaderNames = new Map(
       staff.map((u) => [
         u.keycloakId,

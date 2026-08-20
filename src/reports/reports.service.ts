@@ -223,7 +223,7 @@ export class ReportsService {
           { $group: { _id: '$source', count: { $sum: 1 } } },
         ])
         .exec(),
-      this.computeRepPerformance(vis),
+      this.computeRepPerformance(vis, organizationId),
       this.customerModel.countDocuments(vis).exec(),
       this.customerModel.countDocuments({ ...vis, status: 'active' }).exec(),
       this.ticketModel
@@ -337,7 +337,7 @@ export class ReportsService {
     };
 
     const [reps, teamAgg] = await Promise.all([
-      this.computeRepPerformance(vis),
+      this.computeRepPerformance(vis, organizationId),
       this.opportunityModel
         .aggregate<RepAggRow>([
           { $match: { ...vis, assignedTeamId: { $ne: null } } },
@@ -367,9 +367,12 @@ export class ReportsService {
     const teamIds = teamAgg
       .map((t) => t._id)
       .filter((id): id is string => !!id);
-    const teamNames = await this.teamsService.findNamesByIds(teamIds);
+    const teamNames = await this.teamsService.findNamesByIds(
+      teamIds,
+      organizationId,
+    );
     const teamDocs = await Promise.all(
-      teamIds.map((id) => this.teamsService.findDocById(id)),
+      teamIds.map((id) => this.teamsService.findDocById(id, organizationId)),
     );
     const memberCounts = new Map(
       teamDocs
@@ -400,6 +403,7 @@ export class ReportsService {
   /** Per-owner opportunity rollup, sorted by won value desc. */
   private async computeRepPerformance(
     vis: Record<string, unknown>,
+    organizationId: Types.ObjectId,
   ): Promise<RepPerformanceDto[]> {
     const rows = await this.opportunityModel
       .aggregate<RepAggRow>([
@@ -427,7 +431,10 @@ export class ReportsService {
       .exec();
 
     const ownerIds = rows.map((r) => r._id).filter((id): id is string => !!id);
-    const staff = await this.usersService.findStaffByKeycloakIds(ownerIds);
+    const staff = await this.usersService.findStaffByKeycloakIds(
+      ownerIds,
+      organizationId,
+    );
     const nameById = new Map(
       staff.map((u) => [
         u.keycloakId,
@@ -476,7 +483,7 @@ export class ReportsService {
     const match = buildMatch(dataset, dto.filters, dto.dateRange, vis);
 
     if (dto.metrics && dto.metrics.length > 0) {
-      return this.runAggregate(dataset, model, dto, match);
+      return this.runAggregate(dataset, model, dto, match, organizationId);
     }
     return this.runRows(dataset, model, dto, match);
   }
@@ -486,6 +493,7 @@ export class ReportsService {
     model: Model<any>,
     dto: RunReportDto,
     match: Record<string, unknown>,
+    organizationId: Types.ObjectId,
   ): Promise<ReportResultDto> {
     const groupId = dto.groupBy
       ? buildGroupId(dataset, dto.groupBy, dto.groupByGranularity)
@@ -504,7 +512,10 @@ export class ReportsService {
       const ids = rows
         .map((r) => r._id)
         .filter((v): v is string => typeof v === 'string');
-      const staff = await this.usersService.findStaffByKeycloakIds(ids);
+      const staff = await this.usersService.findStaffByKeycloakIds(
+        ids,
+        organizationId,
+      );
       labelResolver = new Map(
         staff.map((u) => [
           u.keycloakId,
@@ -513,7 +524,10 @@ export class ReportsService {
       );
     } else if (dto.groupBy === 'assignedTeamId') {
       const ids = rows.map((r) => String(r._id)).filter((v) => v !== 'null');
-      labelResolver = await this.teamsService.findNamesByIds(ids);
+      labelResolver = await this.teamsService.findNamesByIds(
+        ids,
+        organizationId,
+      );
     }
 
     const aggregate: ReportAggregateRow[] = rows.map((r) => {
@@ -874,8 +888,14 @@ export class ReportsService {
     admin: boolean,
   ): Promise<SavedReportResponseDto[]> {
     if (reports.length === 0) return [];
+    // Every document in a mapping batch came from one org-scoped query, so
+    // deriving the tenant from the batch itself cannot pick the wrong org.
+    const organizationId = reports[0].organizationId;
     const creatorIds = [...new Set(reports.map((r) => r.createdBy))];
-    const staff = await this.usersService.findStaffByKeycloakIds(creatorIds);
+    const staff = await this.usersService.findStaffByKeycloakIds(
+      creatorIds,
+      organizationId,
+    );
     const nameById = new Map(
       staff.map((u) => [
         u.keycloakId,

@@ -49,6 +49,14 @@ import {
   toActivityResponseDto,
 } from './mappers/activity.mapper';
 
+/**
+ * The one field every linked-record collection shares. `relatedModel()` returns
+ * a model narrowed to this so the tenant filter type-checks across all six.
+ */
+interface OrgScoped {
+  organizationId: Types.ObjectId;
+}
+
 /** Escape user input so it can be safely embedded in a RegExp. */
 function escapeRegExp(input: string): string {
   return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -149,29 +157,36 @@ export class ActivitiesService {
 
     // Load the linked record (also validates it exists)
     const related = dto.relatedType
-      ? await this.getRelatedOrFail(dto.relatedType, dto.relatedId!)
+      ? await this.getRelatedOrFail(
+          dto.relatedType,
+          dto.relatedId!,
+          organizationId,
+        )
       : null;
 
     // Automated assignment: explicit assignee → linked record's owner →
     // creator. Team routing inherits from the linked record when omitted.
     let assignedToId = dto.assignedToId;
     if (assignedToId) {
-      await this.getStaffUserOrFail(assignedToId);
+      await this.getStaffUserOrFail(assignedToId, organizationId);
     } else {
       const relatedOwner = (related as { assignedToId?: string } | null)
         ?.assignedToId;
       assignedToId = relatedOwner ?? createdBy;
       if (relatedOwner) {
-        const [owner] = await this.usersService.findStaffByKeycloakIds([
-          relatedOwner,
-        ]);
+        const [owner] = await this.usersService.findStaffByKeycloakIds(
+          [relatedOwner],
+          organizationId,
+        );
         if (!owner) assignedToId = createdBy;
       }
     }
 
     let assignedTeamId: Types.ObjectId | undefined;
     if (dto.assignedTeamId) {
-      assignedTeamId = (await this.getActiveTeamOrFail(dto.assignedTeamId))._id;
+      assignedTeamId = (
+        await this.getActiveTeamOrFail(dto.assignedTeamId, organizationId)
+      )._id;
     } else {
       const relatedTeam = (
         related as { assignedTeamId?: Types.ObjectId } | null
@@ -474,7 +489,7 @@ export class ActivitiesService {
     const activity = await this.getByIdOrFail(id, organizationId);
 
     if (dto.assignedToId !== undefined) {
-      await this.getStaffUserOrFail(dto.assignedToId);
+      await this.getStaffUserOrFail(dto.assignedToId, organizationId);
       activity.assignedToId = dto.assignedToId;
     }
 
@@ -483,7 +498,7 @@ export class ActivitiesService {
         activity.assignedTeamId = undefined;
       } else {
         activity.assignedTeamId = (
-          await this.getActiveTeamOrFail(dto.assignedTeamId)
+          await this.getActiveTeamOrFail(dto.assignedTeamId, organizationId)
         )._id;
       }
     }
@@ -493,6 +508,7 @@ export class ActivitiesService {
     if (activity.assignedTeamId) {
       const team = await this.teamsService.findDocById(
         activity.assignedTeamId.toString(),
+        organizationId,
       );
       if (team && !team.memberIds.includes(activity.assignedToId)) {
         throw new BadRequestException(
@@ -538,7 +554,12 @@ export class ActivitiesService {
 
     try {
       if (activity.relatedType === 'lead') {
-        const lead = await this.leadModel.findById(activity.relatedId).exec();
+        const lead = await this.leadModel
+          .findOne({
+            _id: activity.relatedId,
+            organizationId: activity.organizationId,
+          })
+          .exec();
         // Converted leads are read-only — leave their history untouched
         if (!lead || lead.status === 'converted') return;
 
@@ -586,7 +607,10 @@ export class ActivitiesService {
         }
       } else if (activity.relatedType === 'contact') {
         const contact = await this.contactModel
-          .findById(activity.relatedId)
+          .findOne({
+            _id: activity.relatedId,
+            organizationId: activity.organizationId,
+          })
           .exec();
         if (!contact) return;
 
@@ -718,36 +742,48 @@ export class ActivitiesService {
     }
   }
 
-  private relatedModel(type: RelatedType): Model<never> {
-    switch (type) {
-      case 'lead':
-        return this.leadModel as Model<never>;
-      case 'contact':
-        return this.contactModel as Model<never>;
-      case 'customer':
-        return this.customerModel as Model<never>;
-      case 'account':
-        return this.accountModel as Model<never>;
-      case 'opportunity':
-        return this.opportunityModel as Model<never>;
-      case 'ticket':
-        return this.ticketModel as Model<never>;
-    }
+  private relatedModel(type: RelatedType): Model<OrgScoped> {
+    const model = (() => {
+      switch (type) {
+        case 'lead':
+          return this.leadModel;
+        case 'contact':
+          return this.contactModel;
+        case 'customer':
+          return this.customerModel;
+        case 'account':
+          return this.accountModel;
+        case 'opportunity':
+          return this.opportunityModel;
+        case 'ticket':
+          return this.ticketModel;
+      }
+    })();
+    return model as unknown as Model<OrgScoped>;
   }
 
   private async getRelatedOrFail(
     type: RelatedType,
     id: string,
+    organizationId: Types.ObjectId,
   ): Promise<unknown> {
-    const doc = await this.relatedModel(type).findById(id).exec();
+    if (!isValidObjectId(id)) {
+      throw new BadRequestException(`Linked ${type} not found`);
+    }
+    const doc = await this.relatedModel(type)
+      .findOne({ _id: id, organizationId })
+      .exec();
     if (!doc) {
       throw new BadRequestException(`Linked ${type} not found`);
     }
     return doc;
   }
 
-  private async getActiveTeamOrFail(teamId: string): Promise<TeamDocument> {
-    const team = await this.teamsService.findDocById(teamId);
+  private async getActiveTeamOrFail(
+    teamId: string,
+    organizationId: Types.ObjectId,
+  ): Promise<TeamDocument> {
+    const team = await this.teamsService.findDocById(teamId, organizationId);
     if (!team) {
       throw new BadRequestException('Assigned team not found');
     }
@@ -759,10 +795,14 @@ export class ActivitiesService {
     return team;
   }
 
-  private async getStaffUserOrFail(keycloakId: string): Promise<void> {
-    const [owner] = await this.usersService.findStaffByKeycloakIds([
-      keycloakId,
-    ]);
+  private async getStaffUserOrFail(
+    keycloakId: string,
+    organizationId: Types.ObjectId,
+  ): Promise<void> {
+    const [owner] = await this.usersService.findStaffByKeycloakIds(
+      [keycloakId],
+      organizationId,
+    );
     if (!owner) {
       throw new BadRequestException('Assignee must be an existing staff user');
     }
@@ -782,6 +822,7 @@ export class ActivitiesService {
     activities: ActivityDocument[],
   ): Promise<ActivityResponseDto[]> {
     if (activities.length === 0) return [];
+    const organizationId = activities[0].organizationId;
 
     const staffIds = [
       ...new Set(activities.flatMap((a) => [a.createdBy, a.assignedToId])),
@@ -795,9 +836,9 @@ export class ActivitiesService {
     ];
 
     const [staff, teamNames, relatedNames] = await Promise.all([
-      this.usersService.findStaffByKeycloakIds(staffIds),
-      this.teamsService.findNamesByIds(teamIds),
-      this.buildRelatedNames(activities),
+      this.usersService.findStaffByKeycloakIds(staffIds, organizationId),
+      this.teamsService.findNamesByIds(teamIds, organizationId),
+      this.buildRelatedNames(activities, organizationId),
     ]);
 
     const staffNames = new Map(
@@ -814,6 +855,7 @@ export class ActivitiesService {
   /** One $in query per linked collection to resolve display names. */
   private async buildRelatedNames(
     activities: ActivityDocument[],
+    organizationId: Types.ObjectId,
   ): Promise<Map<string, string>> {
     const idsByType = new Map<RelatedType, Types.ObjectId[]>();
     for (const a of activities) {
@@ -828,7 +870,7 @@ export class ActivitiesService {
       [...idsByType.entries()].map(async ([type, ids]) => {
         if (type === 'lead') {
           const docs = await this.leadModel
-            .find({ _id: { $in: ids } })
+            .find({ _id: { $in: ids }, organizationId })
             .select('firstName lastName')
             .exec();
           docs.forEach((d) =>
@@ -839,7 +881,7 @@ export class ActivitiesService {
           );
         } else if (type === 'contact') {
           const docs = await this.contactModel
-            .find({ _id: { $in: ids } })
+            .find({ _id: { $in: ids }, organizationId })
             .select('firstName lastName')
             .exec();
           docs.forEach((d) =>
@@ -850,7 +892,7 @@ export class ActivitiesService {
           );
         } else if (type === 'customer') {
           const docs = await this.customerModel
-            .find({ _id: { $in: ids } })
+            .find({ _id: { $in: ids }, organizationId })
             .select('firstName lastName')
             .exec();
           docs.forEach((d) =>
@@ -861,7 +903,7 @@ export class ActivitiesService {
           );
         } else if (type === 'account') {
           const docs = await this.accountModel
-            .find({ _id: { $in: ids } })
+            .find({ _id: { $in: ids }, organizationId })
             .select('name')
             .exec();
           docs.forEach((d) =>
@@ -869,7 +911,7 @@ export class ActivitiesService {
           );
         } else if (type === 'opportunity') {
           const docs = await this.opportunityModel
-            .find({ _id: { $in: ids } })
+            .find({ _id: { $in: ids }, organizationId })
             .select('name')
             .exec();
           docs.forEach((d) =>
@@ -877,7 +919,7 @@ export class ActivitiesService {
           );
         } else {
           const docs = await this.ticketModel
-            .find({ _id: { $in: ids } })
+            .find({ _id: { $in: ids }, organizationId })
             .select('number subject')
             .exec();
           docs.forEach((d) =>

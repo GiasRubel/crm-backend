@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ScheduleModule } from '@nestjs/schedule';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { APP_GUARD } from '@nestjs/core';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
@@ -32,10 +34,24 @@ import { AttachmentsModule } from './attachments/attachments.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { SearchModule } from './search/search.module';
 import { RolesModule } from './roles/roles.module';
+import { validateEnv } from './config/env-validation';
+import { THROTTLE_BUCKETS } from './config/throttle';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
+    ConfigModule.forRoot({ isGlobal: true, validate: validateEnv }),
+    // Named buckets so a route can opt into a tighter limit with @Throttle;
+    // see config/throttle.ts. The default bucket applies to everything else.
+    ThrottlerModule.forRoot({
+      throttlers: [{ name: 'default', ...THROTTLE_BUCKETS.default }],
+      // e2e specs make far more requests than a human would, and several
+      // deliberately retry a login. Gated on NODE_ENV==='test' as well as the
+      // flag, so setting THROTTLE_DISABLED in a real deployment does nothing —
+      // an env var must not be able to switch off a security control.
+      skipIf: () =>
+        process.env.NODE_ENV === 'test' &&
+        process.env.THROTTLE_DISABLED === 'true',
+    }),
     ScheduleModule.forRoot(),
     MongooseModule.forRootAsync({
       useFactory: (configService: ConfigService) => ({
@@ -73,6 +89,11 @@ import { RolesModule } from './roles/roles.module';
     SearchModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [
+    AppService,
+    // Global: an endpoint has to be listed somewhere to be unthrottled, rather
+    // than being unthrottled by default because nobody remembered to add it.
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
+  ],
 })
 export class AppModule {}

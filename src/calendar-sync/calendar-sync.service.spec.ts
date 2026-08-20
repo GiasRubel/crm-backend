@@ -76,7 +76,6 @@ describe('CalendarSyncService', () => {
     connectionModel = {
       create: jest.fn(),
       findOne: jest.fn(),
-      findById: jest.fn(),
       findOneAndUpdate: jest.fn(),
       find: jest.fn(),
       deleteOne: jest.fn(() => ({ exec: jest.fn() })),
@@ -247,7 +246,9 @@ describe('CalendarSyncService', () => {
 
     it('updates instead of creating when already mapped to this connection', async () => {
       const connection = buildConnection();
-      connectionModel.findById.mockResolvedValue(connection);
+      connectionModel.findOne.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(connection),
+      });
       googleProvider.updateEvent.mockResolvedValue({
         id: 'evt-1',
         subject: 'Sync call',
@@ -309,12 +310,14 @@ describe('CalendarSyncService', () => {
   describe('onActivityDeleted', () => {
     it('does nothing when the activity was never synced', async () => {
       await service.onActivityDeleted(buildActivity());
-      expect(connectionModel.findById).not.toHaveBeenCalled();
+      expect(connectionModel.findOne).not.toHaveBeenCalled();
     });
 
     it('deletes the remote event when synced and the connection is active', async () => {
       const connection = buildConnection();
-      connectionModel.findById.mockResolvedValue(connection);
+      connectionModel.findOne.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(connection),
+      });
 
       const activity = buildActivity({
         externalCalendar: {

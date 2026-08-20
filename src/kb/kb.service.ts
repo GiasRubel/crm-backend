@@ -7,6 +7,7 @@ import {
 import { InjectModel } from '@nestjs/mongoose';
 import { isValidObjectId, Model } from 'mongoose';
 import type { Types } from 'mongoose';
+import { OrganizationsService } from '../organizations/organizations.service';
 import { UsersService } from '../users/users.service';
 import { CreateKbArticleDto } from './dto/create-kb-article.dto';
 import { KbFeedbackDto } from './dto/kb-feedback.dto';
@@ -48,6 +49,7 @@ export class KbService {
     @InjectModel(KbArticle.name)
     private readonly articleModel: Model<KbArticleDocument>,
     private readonly usersService: UsersService,
+    private readonly organizationsService: OrganizationsService,
   ) {}
 
   // ── Staff CRUD ──────────────────────────────────────────────────────────
@@ -215,8 +217,11 @@ export class KbService {
 
   /** Published + public articles only; body omitted from the list. */
   async findPublic(query: PublicKbQueryDto): Promise<PublicKbArticleDto[]> {
+    const organizationId = await this.resolvePublicOrgId(
+      query.organizationSlug,
+    );
     const conditions: Record<string, unknown>[] = [
-      { status: 'published', visibility: 'public' },
+      { organizationId, status: 'published', visibility: 'public' },
     ];
     if (query.search?.trim()) {
       const searchRegex = new RegExp(escapeRegExp(query.search.trim()), 'i');
@@ -242,10 +247,15 @@ export class KbService {
   }
 
   /** Single public article by slug; counts the view. */
-  async findPublicBySlug(slug: string): Promise<PublicKbArticleDto> {
+  async findPublicBySlug(
+    slug: string,
+    organizationSlug: string,
+  ): Promise<PublicKbArticleDto> {
+    const organizationId = await this.resolvePublicOrgId(organizationSlug);
     const article = await this.articleModel
       .findOneAndUpdate(
         {
+          organizationId,
           slug: slug.toLowerCase().trim(),
           status: 'published',
           visibility: 'public',
@@ -265,9 +275,10 @@ export class KbService {
     if (!isValidObjectId(id)) {
       throw new NotFoundException('Article not found');
     }
+    const organizationId = await this.resolvePublicOrgId(dto.organizationSlug);
     const result = await this.articleModel
       .updateOne(
-        { _id: id, status: 'published', visibility: 'public' },
+        { _id: id, organizationId, status: 'published', visibility: 'public' },
         { $inc: dto.helpful ? { helpfulCount: 1 } : { notHelpfulCount: 1 } },
       )
       .exec();
@@ -276,22 +287,51 @@ export class KbService {
     }
   }
 
+  /**
+   * Slug → organisation id for the unauthenticated FAQ routes.
+   *
+   * A 404 for an unknown or suspended organisation, deliberately identical to
+   * the 404 for a missing article: an anonymous caller should not be able to
+   * probe which organisation slugs exist on this installation.
+   */
+  private async resolvePublicOrgId(
+    organizationSlug: string,
+  ): Promise<Types.ObjectId> {
+    const organization =
+      await this.organizationsService.findDocBySlug(organizationSlug);
+    if (!organization) {
+      this.logger.warn(
+        `Public KB request for unknown organizationSlug "${organizationSlug}"`,
+      );
+      throw new NotFoundException('Article not found');
+    }
+    return organization._id;
+  }
+
   // ── Cross-module lookups (used by tickets) ──────────────────────────────
 
   /** Map of article id → title, for denormalizing ticket links. */
-  async findTitlesByIds(ids: string[]): Promise<Map<string, string>> {
+  async findTitlesByIds(
+    ids: string[],
+    organizationId: Types.ObjectId,
+  ): Promise<Map<string, string>> {
     if (ids.length === 0) return new Map();
     const articles = await this.articleModel
-      .find({ _id: { $in: ids } })
+      .find({ _id: { $in: ids }, organizationId })
       .select('title')
       .exec();
     return new Map(articles.map((a) => [a._id.toString(), a.title]));
   }
 
   /** Existence check for ticket → article links. */
-  async existsById(id: string): Promise<boolean> {
+  async existsById(
+    id: string,
+    organizationId: Types.ObjectId,
+  ): Promise<boolean> {
     if (!isValidObjectId(id)) return false;
-    return (await this.articleModel.exists({ _id: id })) !== null;
+    return (
+      (await this.articleModel.exists({ _id: id, organizationId })) !== null
+    );
   }
 
   // ── Helpers ─────────────────────────────────────────────────────────────
@@ -347,6 +387,9 @@ export class KbService {
     articles: KbArticleDocument[],
   ): Promise<KbArticleResponseDto[]> {
     if (articles.length === 0) return [];
+    // Every document in a mapping batch came from one org-scoped query, so
+    // deriving the tenant from the batch itself cannot pick the wrong org.
+    const organizationId = articles[0].organizationId;
 
     const staffIds = [
       ...new Set(
@@ -355,7 +398,10 @@ export class KbService {
           .filter((v): v is string => !!v),
       ),
     ];
-    const staff = await this.usersService.findStaffByKeycloakIds(staffIds);
+    const staff = await this.usersService.findStaffByKeycloakIds(
+      staffIds,
+      organizationId,
+    );
     const staffNames = new Map(
       staff.map((u) => [
         u.keycloakId,

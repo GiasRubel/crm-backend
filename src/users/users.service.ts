@@ -159,28 +159,39 @@ export class UsersService {
     return this.userModel.findOne({ email: email.trim().toLowerCase() }).exec();
   }
 
-  /** Staff users (any role except Customer) matching the given keycloakIds. */
-  async findStaffByKeycloakIds(keycloakIds: string[]): Promise<UserDocument[]> {
+  /**
+   * Staff users (any role except Customer) matching the given keycloakIds,
+   * scoped to one organisation. The `organizationId` filter is load-bearing:
+   * these ids arrive from request bodies (owner/assignee fields), so without it
+   * a caller can name another tenant's staff and have their details echoed back.
+   */
+  async findStaffByKeycloakIds(
+    keycloakIds: string[],
+    organizationId: Types.ObjectId,
+  ): Promise<UserDocument[]> {
     if (keycloakIds.length === 0) return [];
     return this.userModel
       .find({
+        organizationId,
         keycloakId: { $in: keycloakIds },
         role: { $ne: AppRole.Customer },
       })
       .exec();
   }
 
-  /** All staff users (any role except Customer), for team member pickers. */
-  async findAllStaff(): Promise<UserDocument[]> {
+  /** All staff users (any role except Customer) in one org, for member pickers. */
+  async findAllStaff(organizationId: Types.ObjectId): Promise<UserDocument[]> {
     return this.userModel
-      .find({ role: { $ne: AppRole.Customer } })
+      .find({ organizationId, role: { $ne: AppRole.Customer } })
       .sort({ firstName: 1, lastName: 1 })
       .exec();
   }
 
   /** Staff directory for the Users admin page, with custom role names denormalized. */
-  async findAllStaffWithRoleNames(): Promise<StaffUserResponseDto[]> {
-    const staff = await this.findAllStaff();
+  async findAllStaffWithRoleNames(
+    organizationId: Types.ObjectId,
+  ): Promise<StaffUserResponseDto[]> {
+    const staff = await this.findAllStaff(organizationId);
     const roleIds = [
       ...new Set(
         staff
@@ -359,13 +370,29 @@ export class UsersService {
   private async provisionFromJwt(
     payload: KeycloakJwtPayload,
   ): Promise<UserDocument> {
+    // Provisioning keys on the email address, so an unverified address is a
+    // credential we cannot trust: whoever registered it never proved they own
+    // it. Refuse before any lookup or write.
+    if (payload.email_verified !== true) {
+      throw new ForbiddenException(
+        'Your email address has not been verified — verify it and sign in again',
+      );
+    }
+
     const identity = this.extractIdentity(payload);
     const existing = await this.findByEmail(identity.email);
 
+    // Never rebind an existing record to a new subject. A collision here means
+    // a *different* identity is presenting an address that already belongs to
+    // someone — the account-takeover vector, not a legitimate re-login (that
+    // path resolves by `sub` in getOrProvisionMe and never reaches this code).
     if (existing) {
-      existing.keycloakId = payload.sub;
-      await existing.save();
-      return this.syncIdentityFields(existing, payload);
+      this.logger.warn(
+        `Refusing to provision ${identity.email}: address already bound to keycloakId ${existing.keycloakId}, token presented ${payload.sub}`,
+      );
+      throw new ConflictException(
+        'An account already exists for this email address — contact your administrator',
+      );
     }
 
     // Standalone (Regular License) deployments have no admin-provisioning
@@ -398,7 +425,28 @@ export class UsersService {
     const identity = this.extractIdentity(payload);
     const updates: Partial<User> = {};
 
-    if (user.email !== identity.email) updates.email = identity.email;
+    // Name/username changes are cosmetic and sync freely. An *email* change is
+    // not: the address is what findByEmail keys the password-reset flow on, so
+    // moving one onto a record needs the same two checks provisioning does —
+    // the new address must be verified, and must not already belong to someone.
+    if (user.email !== identity.email) {
+      if (payload.email_verified !== true) {
+        this.logger.warn(
+          `Ignoring unverified email change for ${user.keycloakId}: ${user.email} -> ${identity.email}`,
+        );
+      } else {
+        const collision = await this.findByEmail(identity.email);
+        if (collision && !collision._id.equals(user._id)) {
+          this.logger.warn(
+            `Refusing email change for ${user.keycloakId}: ${identity.email} already belongs to ${collision.keycloakId}`,
+          );
+          throw new ConflictException(
+            'That email address is already in use by another account',
+          );
+        }
+        updates.email = identity.email;
+      }
+    }
     if (identity.username !== undefined && user.username !== identity.username)
       updates.username = identity.username;
     if (

@@ -133,6 +133,7 @@ export class LeadsService {
     await this.assertNoOpenLeadWithEmail(email, organizationId);
 
     const assignment = await this.resolveAssignmentTargets(
+      organizationId,
       dto.assignedToId,
       dto.assignedTeamId,
     );
@@ -593,7 +594,7 @@ export class LeadsService {
         unsets.assignedTeamId = '';
         targetTeam = null;
       } else {
-        targetTeam = await this.getActiveTeamOrFail(dto.assignedTeamId);
+        targetTeam = await this.getActiveTeamOrFail(dto.assignedTeamId, organizationId);
         sets.assignedTeamId = targetTeam._id;
       }
     }
@@ -602,7 +603,7 @@ export class LeadsService {
       if (dto.assignedToId === null) {
         unsets.assignedToId = '';
       } else {
-        await this.getStaffUserOrFail(dto.assignedToId);
+        await this.getStaffUserOrFail(dto.assignedToId, organizationId);
         sets.assignedToId = dto.assignedToId;
       }
     }
@@ -621,7 +622,10 @@ export class LeadsService {
       targetTeam !== undefined
         ? targetTeam
         : lead.assignedTeamId
-          ? await this.teamsService.findDocById(lead.assignedTeamId.toString())
+          ? await this.teamsService.findDocById(
+              lead.assignedTeamId.toString(),
+              organizationId,
+            )
           : null;
 
     if (finalOwner && finalTeam && !finalTeam.memberIds.includes(finalOwner)) {
@@ -956,6 +960,7 @@ export class LeadsService {
 
   /** Validate optional routing targets on lead creation. */
   private async resolveAssignmentTargets(
+    organizationId: Types.ObjectId,
     assignedToId?: string,
     assignedTeamId?: string,
   ): Promise<{ assignedToId?: string; assignedTeamId?: Types.ObjectId }> {
@@ -964,12 +969,12 @@ export class LeadsService {
 
     let team: TeamDocument | null = null;
     if (assignedTeamId) {
-      team = await this.getActiveTeamOrFail(assignedTeamId);
+      team = await this.getActiveTeamOrFail(assignedTeamId, organizationId);
       result.assignedTeamId = team._id;
     }
 
     if (assignedToId) {
-      await this.getStaffUserOrFail(assignedToId);
+      await this.getStaffUserOrFail(assignedToId, organizationId);
       if (team && !team.memberIds.includes(assignedToId)) {
         throw new BadRequestException(
           'Record owner must be a member of the assigned team',
@@ -981,8 +986,11 @@ export class LeadsService {
     return result;
   }
 
-  private async getActiveTeamOrFail(teamId: string): Promise<TeamDocument> {
-    const team = await this.teamsService.findDocById(teamId);
+  private async getActiveTeamOrFail(
+    teamId: string,
+    organizationId: Types.ObjectId,
+  ): Promise<TeamDocument> {
+    const team = await this.teamsService.findDocById(teamId, organizationId);
     if (!team) {
       throw new BadRequestException('Assigned team not found');
     }
@@ -994,10 +1002,14 @@ export class LeadsService {
     return team;
   }
 
-  private async getStaffUserOrFail(keycloakId: string): Promise<void> {
-    const [owner] = await this.usersService.findStaffByKeycloakIds([
-      keycloakId,
-    ]);
+  private async getStaffUserOrFail(
+    keycloakId: string,
+    organizationId: Types.ObjectId,
+  ): Promise<void> {
+    const [owner] = await this.usersService.findStaffByKeycloakIds(
+      [keycloakId],
+      organizationId,
+    );
     if (!owner) {
       throw new BadRequestException(
         'Record owner must be an existing staff user',
@@ -1021,6 +1033,9 @@ export class LeadsService {
     fieldRestrictions: Map<string, FieldRestrictionInfo> = new Map(),
   ): Promise<LeadResponseDto[]> {
     if (leads.length === 0) return [];
+    // Every document in a mapping batch came from one org-scoped query, so
+    // deriving the tenant from the batch itself cannot pick the wrong org.
+    const organizationId = leads[0].organizationId;
 
     const staffIds = [
       ...new Set(
@@ -1041,8 +1056,8 @@ export class LeadsService {
     ];
 
     const [staff, teamNames] = await Promise.all([
-      this.usersService.findStaffByKeycloakIds(staffIds),
-      this.teamsService.findNamesByIds(teamIds),
+      this.usersService.findStaffByKeycloakIds(staffIds, organizationId),
+      this.teamsService.findNamesByIds(teamIds, organizationId),
     ]);
 
     const staffNames = new Map(

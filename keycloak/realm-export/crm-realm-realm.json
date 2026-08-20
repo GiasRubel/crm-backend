@@ -2,7 +2,7 @@
   "realm": "crm-realm",
   "displayName": "CRM Pro",
   "enabled": true,
-  "registrationAllowed": true,
+  "registrationAllowed": false,
   "loginWithEmailAllowed": true,
   "duplicateEmailsAllowed": false,
   "resetPasswordAllowed": true,
@@ -45,5 +45,20 @@
         "microprofile-jwt"
       ]
     }
-  ]
+  ],
+  "verifyEmail": true,
+  "registrationEmailAsUsername": true,
+  "bruteForceProtected": true,
+  "permanentLockout": false,
+  "failureFactor": 5,
+  "waitIncrementSeconds": 60,
+  "maxFailureWaitSeconds": 900,
+  "maxDeltaTimeSeconds": 43200,
+  "quickLoginCheckMilliSeconds": 1000,
+  "minimumQuickLoginWaitSeconds": 60,
+  "passwordPolicy": "length(12) and notUsername(undefined) and notEmail(undefined) and upperCase(1) and lowerCase(1) and digits(1) and specialChars(1) and passwordHistory(3)",
+  "attributes": {
+    "actionTokenGeneratedByAdminLifespan": "43200",
+    "actionTokenGeneratedByUserLifespan": "900"
+  }
 }

@@ -21,6 +21,7 @@ import { actorFromJwt } from '../audit/audit.service';
 import { CurrentOrg } from '../auth/decorators/current-org.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Public } from '../auth/decorators/public.decorator';
+import { ThrottleCapture } from '../config/throttle';
 import { Roles } from '../auth/decorators/roles.decorator';
 import type { KeycloakJwtPayload } from '../auth/interfaces/keycloak-jwt-payload.interface';
 import { AppRole } from '../users/app-role.enum';
@@ -45,6 +46,7 @@ export class LeadsController {
    */
   @Post('capture')
   @Public()
+  @ThrottleCapture()
   @HttpCode(HttpStatus.ACCEPTED)
   async capture(@Body() dto: CaptureLeadDto): Promise<void> {
     await this.leadsService.capture(dto);

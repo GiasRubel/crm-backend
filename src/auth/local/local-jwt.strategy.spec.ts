@@ -20,6 +20,9 @@ describe('LocalJwtStrategy', () => {
     expect(strategy.validate(payload)).toEqual({
       sub: 'local:abc',
       email: 'a@b.com',
+      // A local password check *is* proof of address ownership, so the payload
+      // satisfies the email_verified gate in UsersService.provisionFromJwt.
+      email_verified: true,
     });
   });
 

@@ -5,6 +5,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
+import { randomInt, timingSafeEqual } from 'node:crypto';
 import { Model, Types } from 'mongoose';
 import { Otp, OtpDocument } from './otp.schema';
 import { MailService } from '../mail/mail.service';
@@ -72,7 +73,7 @@ export class OtpService {
       );
     }
 
-    if (record.code !== submittedCode) {
+    if (!codesMatch(record.code, submittedCode)) {
       record.attempts += 1;
       await record.save();
       const remaining = MAX_ATTEMPTS - record.attempts;
@@ -85,7 +86,27 @@ export class OtpService {
     await record.deleteOne();
   }
 
+  /**
+   * `crypto.randomInt` rather than `Math.random()`: this code is a
+   * password-reset credential, and `Math.random()` is a non-cryptographic PRNG
+   * whose internal state is recoverable from a handful of observed outputs —
+   * which an attacker can collect simply by requesting resets for their own
+   * address.
+   */
   private generateCode(): string {
-    return Math.floor(100_000 + Math.random() * 900_000).toString();
+    return randomInt(100_000, 1_000_000).toString();
   }
+}
+
+/**
+ * Constant-time OTP comparison. The search space is only 900k, so leaking
+ * per-digit timing meaningfully narrows it; the attempt counter limits guesses
+ * but not measurement.
+ */
+function codesMatch(stored: string, submitted: string): boolean {
+  const a = Buffer.from(stored, 'utf8');
+  const b = Buffer.from(submitted, 'utf8');
+  // timingSafeEqual throws on a length mismatch, which is itself a (harmless
+  // here — the length is fixed and public) early exit.
+  return a.length === b.length && timingSafeEqual(a, b);
 }

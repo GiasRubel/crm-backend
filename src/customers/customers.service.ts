@@ -91,6 +91,7 @@ export class CustomersService {
     // Validate routing targets before any external write, so a bad
     // assignment can never leave an orphaned Keycloak user behind.
     const assignment = await this.resolveAssignmentTargets(
+      organizationId,
       dto.assignedToId,
       dto.assignedTeamId,
     );
@@ -552,7 +553,7 @@ export class CustomersService {
         unsets.assignedTeamId = '';
         targetTeam = null;
       } else {
-        targetTeam = await this.getActiveTeamOrFail(dto.assignedTeamId);
+        targetTeam = await this.getActiveTeamOrFail(dto.assignedTeamId, organizationId);
         sets.assignedTeamId = targetTeam._id;
       }
     }
@@ -561,7 +562,7 @@ export class CustomersService {
       if (dto.assignedToId === null) {
         unsets.assignedToId = '';
       } else {
-        await this.getStaffUserOrFail(dto.assignedToId);
+        await this.getStaffUserOrFail(dto.assignedToId, organizationId);
         sets.assignedToId = dto.assignedToId;
       }
     }
@@ -582,6 +583,7 @@ export class CustomersService {
         : customer.assignedTeamId
           ? await this.teamsService.findDocById(
               customer.assignedTeamId.toString(),
+              organizationId,
             )
           : null;
 
@@ -690,9 +692,12 @@ export class CustomersService {
   // ── Cross-module lookups (used by opportunities/leads) ─────────────────
 
   /** Raw document lookup for other modules; null for malformed/unknown ids. */
-  async findDocById(id: string): Promise<CustomerDocument | null> {
+  async findDocById(
+    id: string,
+    organizationId: Types.ObjectId,
+  ): Promise<CustomerDocument | null> {
     if (!isValidObjectId(id)) return null;
-    return this.customerModel.findById(id).exec();
+    return this.customerModel.findOne({ _id: id, organizationId }).exec();
   }
 
   /** Portal identity → customer document (used by the tickets portal). */
@@ -703,10 +708,13 @@ export class CustomersService {
   }
 
   /** Map of customer id → display name for response denormalization. */
-  async findNamesByIds(ids: string[]): Promise<Map<string, string>> {
+  async findNamesByIds(
+    ids: string[],
+    organizationId: Types.ObjectId,
+  ): Promise<Map<string, string>> {
     if (ids.length === 0) return new Map();
     const customers = await this.customerModel
-      .find({ _id: { $in: ids } })
+      .find({ _id: { $in: ids }, organizationId })
       .select('firstName lastName company')
       .exec();
     return new Map(
@@ -790,6 +798,7 @@ export class CustomersService {
 
   /** Validate optional routing targets on customer creation. */
   private async resolveAssignmentTargets(
+    organizationId: Types.ObjectId,
     assignedToId?: string,
     assignedTeamId?: string,
   ): Promise<{ assignedToId?: string; assignedTeamId?: Types.ObjectId }> {
@@ -798,12 +807,12 @@ export class CustomersService {
 
     let team: TeamDocument | null = null;
     if (assignedTeamId) {
-      team = await this.getActiveTeamOrFail(assignedTeamId);
+      team = await this.getActiveTeamOrFail(assignedTeamId, organizationId);
       result.assignedTeamId = team._id;
     }
 
     if (assignedToId) {
-      await this.getStaffUserOrFail(assignedToId);
+      await this.getStaffUserOrFail(assignedToId, organizationId);
       if (team && !team.memberIds.includes(assignedToId)) {
         throw new BadRequestException(
           'Record owner must be a member of the assigned team',
@@ -815,8 +824,11 @@ export class CustomersService {
     return result;
   }
 
-  private async getActiveTeamOrFail(teamId: string): Promise<TeamDocument> {
-    const team = await this.teamsService.findDocById(teamId);
+  private async getActiveTeamOrFail(
+    teamId: string,
+    organizationId: Types.ObjectId,
+  ): Promise<TeamDocument> {
+    const team = await this.teamsService.findDocById(teamId, organizationId);
     if (!team) {
       throw new BadRequestException('Assigned team not found');
     }
@@ -828,10 +840,14 @@ export class CustomersService {
     return team;
   }
 
-  private async getStaffUserOrFail(keycloakId: string): Promise<void> {
-    const [owner] = await this.usersService.findStaffByKeycloakIds([
-      keycloakId,
-    ]);
+  private async getStaffUserOrFail(
+    keycloakId: string,
+    organizationId: Types.ObjectId,
+  ): Promise<void> {
+    const [owner] = await this.usersService.findStaffByKeycloakIds(
+      [keycloakId],
+      organizationId,
+    );
     if (!owner) {
       throw new BadRequestException(
         'Record owner must be an existing staff user',
@@ -855,6 +871,9 @@ export class CustomersService {
     fieldRestrictions: Map<string, FieldRestrictionInfo> = new Map(),
   ): Promise<CustomerResponseDto[]> {
     if (customers.length === 0) return [];
+    // Every document in a mapping batch came from one org-scoped query, so
+    // deriving the tenant from the batch itself cannot pick the wrong org.
+    const organizationId = customers[0].organizationId;
 
     const ownerIds = [
       ...new Set(
@@ -870,8 +889,8 @@ export class CustomersService {
     ];
 
     const [owners, teamNames] = await Promise.all([
-      this.usersService.findStaffByKeycloakIds(ownerIds),
-      this.teamsService.findNamesByIds(teamIds),
+      this.usersService.findStaffByKeycloakIds(ownerIds, organizationId),
+      this.teamsService.findNamesByIds(teamIds, organizationId),
     ]);
 
     const ownerNames = new Map(

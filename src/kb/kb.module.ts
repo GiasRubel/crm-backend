@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
+import { OrganizationsModule } from '../organizations/organizations.module';
 import { UsersModule } from '../users/users.module';
 import { KbArticle, KbArticleSchema } from './kb-article.schema';
 import { KbController } from './kb.controller';
@@ -11,6 +12,7 @@ import { KbService } from './kb.service';
       { name: KbArticle.name, schema: KbArticleSchema },
     ]),
     UsersModule,
+    OrganizationsModule,
   ],
   controllers: [KbController],
   providers: [KbService],

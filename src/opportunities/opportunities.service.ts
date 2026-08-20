@@ -109,14 +109,20 @@ export class OpportunitiesService {
       'opportunity',
       'create',
     );
-    const customer = await this.customersService.findDocById(dto.customerId);
+    const customer = await this.customersService.findDocById(
+      dto.customerId,
+      organizationId,
+    );
     if (!customer) {
       throw new BadRequestException('Customer not found');
     }
 
     let accountObjectId: Types.ObjectId | undefined;
     if (dto.accountId) {
-      const account = await this.accountsService.findDocById(dto.accountId);
+      const account = await this.accountsService.findDocById(
+        dto.accountId,
+        organizationId,
+      );
       if (!account) {
         throw new BadRequestException('Linked account not found');
       }
@@ -124,6 +130,7 @@ export class OpportunitiesService {
     }
 
     const assignment = await this.resolveAssignmentTargets(
+      organizationId,
       dto.assignedToId,
       dto.assignedTeamId,
     );
@@ -432,7 +439,10 @@ export class OpportunitiesService {
       if (dto.accountId === null) {
         opportunity.accountId = undefined;
       } else {
-        const account = await this.accountsService.findDocById(dto.accountId);
+        const account = await this.accountsService.findDocById(
+          dto.accountId,
+          organizationId,
+        );
         if (!account) {
           throw new BadRequestException('Linked account not found');
         }
@@ -580,7 +590,7 @@ export class OpportunitiesService {
         unsets.assignedTeamId = '';
         targetTeam = null;
       } else {
-        targetTeam = await this.getActiveTeamOrFail(dto.assignedTeamId);
+        targetTeam = await this.getActiveTeamOrFail(dto.assignedTeamId, organizationId);
         sets.assignedTeamId = targetTeam._id;
       }
     }
@@ -589,7 +599,7 @@ export class OpportunitiesService {
       if (dto.assignedToId === null) {
         unsets.assignedToId = '';
       } else {
-        await this.getStaffUserOrFail(dto.assignedToId);
+        await this.getStaffUserOrFail(dto.assignedToId, organizationId);
         sets.assignedToId = dto.assignedToId;
       }
     }
@@ -610,6 +620,7 @@ export class OpportunitiesService {
         : opportunity.assignedTeamId
           ? await this.teamsService.findDocById(
               opportunity.assignedTeamId.toString(),
+              organizationId,
             )
           : null;
 
@@ -755,6 +766,7 @@ export class OpportunitiesService {
 
   /** Validate optional routing targets on opportunity creation. */
   private async resolveAssignmentTargets(
+    organizationId: Types.ObjectId,
     assignedToId?: string,
     assignedTeamId?: string,
   ): Promise<{ assignedToId?: string; assignedTeamId?: Types.ObjectId }> {
@@ -763,12 +775,12 @@ export class OpportunitiesService {
 
     let team: TeamDocument | null = null;
     if (assignedTeamId) {
-      team = await this.getActiveTeamOrFail(assignedTeamId);
+      team = await this.getActiveTeamOrFail(assignedTeamId, organizationId);
       result.assignedTeamId = team._id;
     }
 
     if (assignedToId) {
-      await this.getStaffUserOrFail(assignedToId);
+      await this.getStaffUserOrFail(assignedToId, organizationId);
       if (team && !team.memberIds.includes(assignedToId)) {
         throw new BadRequestException(
           'Record owner must be a member of the assigned team',
@@ -780,8 +792,11 @@ export class OpportunitiesService {
     return result;
   }
 
-  private async getActiveTeamOrFail(teamId: string): Promise<TeamDocument> {
-    const team = await this.teamsService.findDocById(teamId);
+  private async getActiveTeamOrFail(
+    teamId: string,
+    organizationId: Types.ObjectId,
+  ): Promise<TeamDocument> {
+    const team = await this.teamsService.findDocById(teamId, organizationId);
     if (!team) {
       throw new BadRequestException('Assigned team not found');
     }
@@ -793,10 +808,14 @@ export class OpportunitiesService {
     return team;
   }
 
-  private async getStaffUserOrFail(keycloakId: string): Promise<void> {
-    const [owner] = await this.usersService.findStaffByKeycloakIds([
-      keycloakId,
-    ]);
+  private async getStaffUserOrFail(
+    keycloakId: string,
+    organizationId: Types.ObjectId,
+  ): Promise<void> {
+    const [owner] = await this.usersService.findStaffByKeycloakIds(
+      [keycloakId],
+      organizationId,
+    );
     if (!owner) {
       throw new BadRequestException(
         'Record owner must be an existing staff user',
@@ -820,6 +839,9 @@ export class OpportunitiesService {
     fieldRestrictions: Map<string, FieldRestrictionInfo> = new Map(),
   ): Promise<OpportunityResponseDto[]> {
     if (opportunities.length === 0) return [];
+    // Every document in a mapping batch came from one org-scoped query, so
+    // deriving the tenant from the batch itself cannot pick the wrong org.
+    const organizationId = opportunities[0].organizationId;
 
     const staffIds = [
       ...new Set(
@@ -850,10 +872,10 @@ export class OpportunitiesService {
     ];
 
     const [staff, teamNames, customerNames, accountNames] = await Promise.all([
-      this.usersService.findStaffByKeycloakIds(staffIds),
-      this.teamsService.findNamesByIds(teamIds),
-      this.customersService.findNamesByIds(customerIds),
-      this.accountsService.findNamesByIds(accountIds),
+      this.usersService.findStaffByKeycloakIds(staffIds, organizationId),
+      this.teamsService.findNamesByIds(teamIds, organizationId),
+      this.customersService.findNamesByIds(customerIds, organizationId),
+      this.accountsService.findNamesByIds(accountIds, organizationId),
     ]);
 
     const staffNames = new Map(

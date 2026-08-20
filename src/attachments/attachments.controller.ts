@@ -27,8 +27,22 @@ import { AppRole } from '../users/app-role.enum';
 import { AttachmentsService } from './attachments.service';
 import { AttachmentQueryDto } from './dto/attachment-query.dto';
 import { UploadAttachmentDto } from './dto/upload-attachment.dto';
+import { ALLOWED_MIME_TYPES, safeContentType } from './mime-allowlist';
 
 const DEFAULT_MAX_ATTACHMENT_MB = 15;
+
+/**
+ * Multer's own ceiling, applied while the request body is being read.
+ *
+ * The `MAX_ATTACHMENT_SIZE_MB` check below runs *after* the upload is fully
+ * buffered in memory, so on its own it cannot stop a multi-gigabyte POST from
+ * exhausting the heap first. This limit is the one that actually protects the
+ * process; it is deliberately generous relative to the business limit so the
+ * business limit stays the one users see, and is a constant rather than config
+ * because an interceptor's options are evaluated at class-decoration time,
+ * before any ConfigService exists.
+ */
+const HARD_UPLOAD_LIMIT_BYTES = 25 * 1024 * 1024;
 
 @ApiTags('attachments')
 @ApiBearerAuth('access-token')
@@ -49,7 +63,31 @@ export class AttachmentsController {
 
   @Post()
   @Roles(AppRole.Admin, AppRole.Administrator, AppRole.User)
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: {
+        fileSize: HARD_UPLOAD_LIMIT_BYTES,
+        files: 1,
+        // Cap the multipart envelope too — unbounded field counts and name
+        // lengths are their own cheap memory-exhaustion vector.
+        fields: 10,
+        fieldSize: 64 * 1024,
+        fieldNameSize: 200,
+      },
+      fileFilter: (_req, file, callback) => {
+        if (!ALLOWED_MIME_TYPES.has(file.mimetype)) {
+          callback(
+            new BadRequestException(
+              `Files of type "${file.mimetype}" are not accepted`,
+            ),
+            false,
+          );
+          return;
+        }
+        callback(null, true);
+      },
+    }),
+  )
   async upload(
     @UploadedFile() file: Express.Multer.File | undefined,
     @Body() dto: UploadAttachmentDto,
@@ -99,7 +137,11 @@ export class AttachmentsController {
     const { attachment, absolutePath } =
       await this.attachmentsService.getFileOrFail(id, organizationId);
     const safeName = attachment.originalName.replace(/["\r\n]/g, '');
-    res.setHeader('Content-Type', attachment.mimeType);
+    // `mimeType` is whatever the uploading client claimed, so it is never echoed
+    // verbatim: downgrade anything not known-inline-safe to a binary stream, and
+    // forbid content sniffing so the browser cannot override us either way.
+    res.setHeader('Content-Type', safeContentType(attachment.mimeType));
+    res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Content-Disposition', `attachment; filename="${safeName}"`);
     res.sendFile(absolutePath);
   }

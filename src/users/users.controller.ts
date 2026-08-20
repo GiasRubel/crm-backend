@@ -40,8 +40,10 @@ export class UsersController {
   /** Staff directory (non-Customer users) — used for team member/owner pickers. */
   @Get('staff')
   @Roles(AppRole.Admin, AppRole.Administrator, AppRole.User)
-  getStaff(): Promise<StaffUserResponseDto[]> {
-    return this.usersService.findAllStaffWithRoleNames();
+  getStaff(
+    @CurrentOrg() organizationId: Types.ObjectId,
+  ): Promise<StaffUserResponseDto[]> {
+    return this.usersService.findAllStaffWithRoleNames(organizationId);
   }
 
   /** Admin-invited teammate — the only way to add staff besides the standalone first-login bootstrap. */

@@ -3,6 +3,7 @@ import { ApiTags } from '@nestjs/swagger';
 import { LicensingService } from './licensing.service';
 import { ActivateLicenseDto } from './dto/activate-license.dto';
 import { Public } from '../auth/decorators/public.decorator';
+import { ThrottleActivate } from '../config/throttle';
 
 @ApiTags('licensing')
 @Controller('licensing')
@@ -17,6 +18,7 @@ export class LicensingController {
   }
 
   @Public()
+  @ThrottleActivate()
   @Post('activate')
   activate(@Body() dto: ActivateLicenseDto) {
     return this.licensingService.activate(dto);

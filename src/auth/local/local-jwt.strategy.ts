@@ -28,6 +28,8 @@ export class LocalJwtStrategy extends PassportStrategy(Strategy, 'local-jwt') {
       throw new UnauthorizedException('Invalid token type');
     }
 
-    return { sub: payload.sub, email: payload.email };
+    // email_verified: the credentials behind this token were checked against
+    // our own users collection, so the address is as trusted as it gets here.
+    return { sub: payload.sub, email: payload.email, email_verified: true };
   }
 }

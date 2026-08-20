@@ -439,9 +439,10 @@ export class AutomationsService implements OnModuleInit, OnModuleDestroy {
         // Assignee: the record's owner (validated staff), else rule creator
         let assignee = run.record.assignedToId as string | undefined;
         if (assignee) {
-          const [staff] = await this.usersService.findStaffByKeycloakIds([
-            assignee,
-          ]);
+          const [staff] = await this.usersService.findStaffByKeycloakIds(
+            [assignee],
+            rule.organizationId,
+          );
           if (!staff) assignee = undefined;
         }
         assignee = assignee ?? rule.createdBy;
@@ -472,7 +473,11 @@ export class AutomationsService implements OnModuleInit, OnModuleDestroy {
       }
 
       case 'send_email': {
-        const to = await this.resolveEmailRecipient(action, run.record);
+        const to = await this.resolveEmailRecipient(
+          action,
+          run.record,
+          rule.organizationId,
+        );
         const subject = renderTemplate(
           action.emailSubject ?? `CRM notification: ${rule.name}`,
           run.context,
@@ -565,6 +570,7 @@ export class AutomationsService implements OnModuleInit, OnModuleDestroy {
   private async resolveEmailRecipient(
     action: RuleAction,
     record: Record<string, unknown>,
+    organizationId: Types.ObjectId,
   ): Promise<string> {
     if (action.emailTo === 'custom') {
       if (!action.emailAddress) {
@@ -575,7 +581,10 @@ export class AutomationsService implements OnModuleInit, OnModuleDestroy {
     if (action.emailTo === 'owner') {
       const ownerId = record.assignedToId as string | undefined;
       if (!ownerId) throw new Error('record has no owner to email');
-      const [owner] = await this.usersService.findStaffByKeycloakIds([ownerId]);
+      const [owner] = await this.usersService.findStaffByKeycloakIds(
+        [ownerId],
+        organizationId,
+      );
       if (!owner?.email) throw new Error('record owner has no email');
       return owner.email;
     }
@@ -585,6 +594,7 @@ export class AutomationsService implements OnModuleInit, OnModuleDestroy {
     if (!email && record.customerId) {
       const customer = await this.customersService.findDocById(
         String(record.customerId),
+        organizationId,
       );
       email = customer?.email;
     }
@@ -608,7 +618,7 @@ export class AutomationsService implements OnModuleInit, OnModuleDestroy {
     createdBy: string,
     organizationId: Types.ObjectId,
   ): Promise<AutomationRuleResponseDto> {
-    await this.validateRuleShape(dto);
+    await this.validateRuleShape(dto, organizationId);
 
     const rule = await this.ruleModel.create({
       organizationId,
@@ -734,13 +744,16 @@ export class AutomationsService implements OnModuleInit, OnModuleDestroy {
     if (dto.actions !== undefined)
       rule.actions = this.toActionDocs(dto.actions);
 
-    await this.validateRuleShape({
-      kind: rule.kind,
-      triggerEvent: rule.triggerEvent,
-      slaEntity: rule.slaEntity,
-      slaIdleHours: rule.slaIdleHours,
-      actions: rule.actions,
-    });
+    await this.validateRuleShape(
+      {
+        kind: rule.kind,
+        triggerEvent: rule.triggerEvent,
+        slaEntity: rule.slaEntity,
+        slaIdleHours: rule.slaIdleHours,
+        actions: rule.actions,
+      },
+      organizationId,
+    );
 
     await rule.save();
     this.logger.log(`Automation rule updated: ${id}`);
@@ -828,13 +841,16 @@ export class AutomationsService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** Kind-specific requireds + per-action parameter checks. */
-  private async validateRuleShape(rule: {
-    kind: string;
-    triggerEvent?: string;
-    slaEntity?: string;
-    slaIdleHours?: number;
-    actions: (RuleAction | RuleActionDto)[];
-  }): Promise<void> {
+  private async validateRuleShape(
+    rule: {
+      kind: string;
+      triggerEvent?: string;
+      slaEntity?: string;
+      slaIdleHours?: number;
+      actions: (RuleAction | RuleActionDto)[];
+    },
+    organizationId: Types.ObjectId,
+  ): Promise<void> {
     if (rule.kind === 'trigger' && !rule.triggerEvent) {
       throw new BadRequestException('Trigger rules need a triggerEvent');
     }
@@ -872,9 +888,10 @@ export class AutomationsService implements OnModuleInit, OnModuleDestroy {
           );
         }
         if (action.assignToId) {
-          const [staff] = await this.usersService.findStaffByKeycloakIds([
-            action.assignToId,
-          ]);
+          const [staff] = await this.usersService.findStaffByKeycloakIds(
+            [action.assignToId],
+            organizationId,
+          );
           if (!staff) {
             throw new BadRequestException(
               'assign_record target must be an existing staff user',
@@ -884,6 +901,7 @@ export class AutomationsService implements OnModuleInit, OnModuleDestroy {
         if (action.assignTeamId) {
           const team = await this.teamsService.findDocById(
             action.assignTeamId.toString(),
+            organizationId,
           );
           if (!team || !team.isActive) {
             throw new BadRequestException(

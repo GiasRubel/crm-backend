@@ -103,10 +103,10 @@ export class ContactsService {
     await this.assertEmailAvailable(email);
 
     const accountId = dto.accountId
-      ? await this.getAccountIdOrFail(dto.accountId)
+      ? await this.getAccountIdOrFail(dto.accountId, organizationId)
       : undefined;
     const customerId = dto.customerId
-      ? await this.getCustomerIdOrFail(dto.customerId)
+      ? await this.getCustomerIdOrFail(dto.customerId, organizationId)
       : undefined;
     if (dto.isPrimary && !accountId) {
       throw new BadRequestException(
@@ -115,6 +115,7 @@ export class ContactsService {
     }
 
     const assignment = await this.resolveAssignmentTargets(
+      organizationId,
       dto.assignedToId,
       dto.assignedTeamId,
     );
@@ -374,7 +375,10 @@ export class ContactsService {
         contact.accountId = undefined;
         contact.isPrimary = false;
       } else {
-        contact.accountId = await this.getAccountIdOrFail(dto.accountId);
+        contact.accountId = await this.getAccountIdOrFail(
+          dto.accountId,
+          organizationId,
+        );
       }
     }
 
@@ -385,6 +389,7 @@ export class ContactsService {
       } else {
         contact.customerId = await this.getCustomerIdOrFail(
           dto.customerId,
+          organizationId,
           contact._id,
         );
       }
@@ -505,7 +510,7 @@ export class ContactsService {
         unsets.assignedTeamId = '';
         targetTeam = null;
       } else {
-        targetTeam = await this.getActiveTeamOrFail(dto.assignedTeamId);
+        targetTeam = await this.getActiveTeamOrFail(dto.assignedTeamId, organizationId);
         sets.assignedTeamId = targetTeam._id;
       }
     }
@@ -514,7 +519,7 @@ export class ContactsService {
       if (dto.assignedToId === null) {
         unsets.assignedToId = '';
       } else {
-        await this.getStaffUserOrFail(dto.assignedToId);
+        await this.getStaffUserOrFail(dto.assignedToId, organizationId);
         sets.assignedToId = dto.assignedToId;
       }
     }
@@ -535,6 +540,7 @@ export class ContactsService {
         : contact.assignedTeamId
           ? await this.teamsService.findDocById(
               contact.assignedTeamId.toString(),
+              organizationId,
             )
           : null;
 
@@ -707,8 +713,14 @@ export class ContactsService {
       .exec();
   }
 
-  private async getAccountIdOrFail(accountId: string): Promise<Types.ObjectId> {
-    const account = await this.accountsService.findDocById(accountId);
+  private async getAccountIdOrFail(
+    accountId: string,
+    organizationId: Types.ObjectId,
+  ): Promise<Types.ObjectId> {
+    const account = await this.accountsService.findDocById(
+      accountId,
+      organizationId,
+    );
     if (!account) {
       throw new BadRequestException('Linked account not found');
     }
@@ -718,9 +730,13 @@ export class ContactsService {
   /** Validate the customer link; a customer maps to at most one contact. */
   private async getCustomerIdOrFail(
     customerId: string,
+    organizationId: Types.ObjectId,
     excludeContactId?: Types.ObjectId,
   ): Promise<Types.ObjectId> {
-    const customer = await this.customersService.findDocById(customerId);
+    const customer = await this.customersService.findDocById(
+      customerId,
+      organizationId,
+    );
     if (!customer) {
       throw new BadRequestException('Linked customer not found');
     }
@@ -740,6 +756,7 @@ export class ContactsService {
 
   /** Validate optional routing targets on contact creation. */
   private async resolveAssignmentTargets(
+    organizationId: Types.ObjectId,
     assignedToId?: string,
     assignedTeamId?: string,
   ): Promise<{ assignedToId?: string; assignedTeamId?: Types.ObjectId }> {
@@ -748,12 +765,12 @@ export class ContactsService {
 
     let team: TeamDocument | null = null;
     if (assignedTeamId) {
-      team = await this.getActiveTeamOrFail(assignedTeamId);
+      team = await this.getActiveTeamOrFail(assignedTeamId, organizationId);
       result.assignedTeamId = team._id;
     }
 
     if (assignedToId) {
-      await this.getStaffUserOrFail(assignedToId);
+      await this.getStaffUserOrFail(assignedToId, organizationId);
       if (team && !team.memberIds.includes(assignedToId)) {
         throw new BadRequestException(
           'Record owner must be a member of the assigned team',
@@ -765,8 +782,11 @@ export class ContactsService {
     return result;
   }
 
-  private async getActiveTeamOrFail(teamId: string): Promise<TeamDocument> {
-    const team = await this.teamsService.findDocById(teamId);
+  private async getActiveTeamOrFail(
+    teamId: string,
+    organizationId: Types.ObjectId,
+  ): Promise<TeamDocument> {
+    const team = await this.teamsService.findDocById(teamId, organizationId);
     if (!team) {
       throw new BadRequestException('Assigned team not found');
     }
@@ -778,10 +798,14 @@ export class ContactsService {
     return team;
   }
 
-  private async getStaffUserOrFail(keycloakId: string): Promise<void> {
-    const [owner] = await this.usersService.findStaffByKeycloakIds([
-      keycloakId,
-    ]);
+  private async getStaffUserOrFail(
+    keycloakId: string,
+    organizationId: Types.ObjectId,
+  ): Promise<void> {
+    const [owner] = await this.usersService.findStaffByKeycloakIds(
+      [keycloakId],
+      organizationId,
+    );
     if (!owner) {
       throw new BadRequestException(
         'Record owner must be an existing staff user',
@@ -805,6 +829,9 @@ export class ContactsService {
     fieldRestrictions: Map<string, FieldRestrictionInfo> = new Map(),
   ): Promise<ContactResponseDto[]> {
     if (contacts.length === 0) return [];
+    // Every document in a mapping batch came from one org-scoped query, so
+    // deriving the tenant from the batch itself cannot pick the wrong org.
+    const organizationId = contacts[0].organizationId;
 
     const staffIds = [
       ...new Set(
@@ -832,9 +859,9 @@ export class ContactsService {
     ];
 
     const [staff, teamNames, accountNames] = await Promise.all([
-      this.usersService.findStaffByKeycloakIds(staffIds),
-      this.teamsService.findNamesByIds(teamIds),
-      this.accountsService.findNamesByIds(accountIds),
+      this.usersService.findStaffByKeycloakIds(staffIds, organizationId),
+      this.teamsService.findNamesByIds(teamIds, organizationId),
+      this.accountsService.findNamesByIds(accountIds, organizationId),
     ]);
 
     const staffNames = new Map(
